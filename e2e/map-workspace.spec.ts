@@ -15,9 +15,7 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("generates, filters, and removes random data in the focused area", async ({
-  page,
-}) => {
+test("starts with only the nearby-parks contributions", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByTestId("location-status")).toHaveText(
@@ -29,30 +27,16 @@ test("generates, filters, and removes random data in the focused area", async ({
   await expect(page.getByText("No active heatmaps")).toBeVisible();
   await expect(page.getByText("Places workspace")).toHaveCount(0);
   await expect(page.getByText("Explore the map")).toHaveCount(0);
-
-  await page.getByLabel("Heatmap").selectOption("demo-places/density");
-  await expect(page.getByTestId("map-active-summary")).toContainText(
-    "Random heatmap140",
-  );
-
-  await page.getByLabel("Filter").selectOption("demo-places/minimum-weight");
-  await expect(page.getByTestId("region-count")).toHaveText("3");
-  await page
-    .getByRole("slider", { name: "Random coverage" })
-    .fill("10");
-  await expect(page.getByTestId("map-active-summary")).not.toContainText(
-    "Random heatmap140",
-  );
-  await page.getByRole("button", { name: "Clear all" }).click();
-  await expect(page.getByTestId("region-count")).toHaveText("0");
-
-  await page
-    .getByRole("button", { name: "Remove Random area filter" })
-    .click();
-  await expect(page.getByTestId("map-active-summary")).toContainText(
-    "Random heatmap140",
-  );
-  await expect(page.getByTestId("region-count")).toHaveText("0");
+  await expect(page.getByLabel("Filter").locator("option")).toHaveCount(2);
+  await expect(page.getByLabel("Heatmap").locator("option")).toHaveCount(2);
+  await expect(
+    page.getByLabel("Filter").locator('option[value="nearby-parks/distance"]'),
+  ).toHaveText("Nearby parks · Park distance");
+  await expect(
+    page
+      .getByLabel("Heatmap")
+      .locator('option[value="nearby-parks/influence"]'),
+  ).toHaveText("Nearby parks · Park influence");
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -64,19 +48,93 @@ test("generates, filters, and removes random data in the focused area", async ({
     .toEqual({ longitude: -74.006, latitude: 40.7128 });
 });
 
+test("loads nearby park regions and influence contours", async ({ page }) => {
+  let parkRequests = 0;
+  await page.route("**/api/parks?**", async (route) => {
+    parkRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        tiles: [],
+        parks: [
+          {
+            id: "way/1",
+            name: "Box Park",
+            center: [-74.006, 40.7128],
+            bbox: {
+              west: -74.012,
+              south: 40.708,
+              east: -74,
+              north: 40.718,
+            },
+          },
+          {
+            id: "node/2",
+            name: "Point Park",
+            center: [-73.99, 40.72],
+          },
+        ],
+      }),
+    });
+  });
+  await page.goto("/");
+
+  await page.getByLabel("Filter").selectOption("nearby-parks/distance");
+  await expect(page.getByTestId("region-count")).toHaveText("2");
+  await expect(page.getByText(/2 filter-owned regions/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Clear all" })).toBeDisabled();
+
+  await page.getByRole("slider", { name: "Park distance" }).fill("0");
+  await expect(page.getByTestId("region-count")).toHaveText("1");
+
+  await page.getByLabel("Heatmap").selectOption("nearby-parks/influence");
+  await expect(page.getByTestId("map-active-summary")).toContainText(
+    "Park influence2",
+  );
+  expect(parkRequests).toBe(1);
+
+  const map = page.getByTestId("map");
+  const box = await map.boundingBox();
+  expect(box).not.toBeNull();
+  if (box) {
+    for (let index = 0; index < 3; index += 1) {
+      await page.mouse.move(box.x + box.width * 0.9, box.y + box.height * 0.5);
+      await page.mouse.down();
+      await page.mouse.move(box.x + box.width * 0.45, box.y + box.height * 0.5, {
+        steps: 10,
+      });
+      await page.mouse.up();
+      await page.waitForTimeout(600);
+    }
+  }
+  await expect.poll(() => parkRequests).toBeGreaterThan(1);
+
+  await page.getByRole("button", { name: "Remove Park distance" }).click();
+  await expect(page.getByTestId("region-count")).toHaveText("0");
+  await page.getByRole("button", { name: "Remove Park influence" }).click();
+});
+
 test("allows duplicate heatmap instances", async ({ page }) => {
+  await page.route("**/api/parks?**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ tiles: [], parks: [] }),
+    }),
+  );
   await page.goto("/");
 
   const heatmapSelector = page.getByLabel("Heatmap", { exact: true });
-  await heatmapSelector.selectOption("demo-places/density");
-  await heatmapSelector.selectOption("demo-places/density");
+  await heatmapSelector.selectOption("nearby-parks/influence");
+  await heatmapSelector.selectOption("nearby-parks/influence");
 
   const removeButtons = page.getByRole("button", {
-    name: "Remove Random heatmap",
+    name: "Remove Park influence",
   });
   await expect(removeButtons).toHaveCount(2);
   await expect(
-    page.getByTestId("map-active-summary").getByText("Random heatmap"),
+    page.getByTestId("map-active-summary").getByText("Park influence"),
   ).toHaveCount(2);
 
   await removeButtons.first().click();

@@ -1,0 +1,41 @@
+import { featureCollection, polygon } from "@turf/helpers";
+import { normalizeHeatmapFeatures, pointMatchesRegions } from "./composition";
+import { simplifyRegionCollection } from "./regions";
+
+function square(index: number) {
+  const west = index * 0.01;
+  return polygon([
+    [
+      [west, 0],
+      [west + 0.02, 0],
+      [west + 0.02, 0.02],
+      [west, 0.02],
+      [west, 0],
+    ],
+  ]);
+}
+
+describe("region collection simplification", () => {
+  it("keeps small collections independent and unions large collections", () => {
+    expect(simplifyRegionCollection([square(0), square(1)], 2)).toHaveLength(2);
+
+    const simplified = simplifyRegionCollection(
+      Array.from({ length: 101 }, (_, index) => square(index)),
+    );
+    expect(simplified).toHaveLength(1);
+
+    const [point] = normalizeHeatmapFeatures(
+      featureCollection([
+        {
+          type: "Feature",
+          properties: {},
+          geometry: { type: "Point", coordinates: [0.5, 0.01] },
+        },
+      ]),
+      { extensionId: "test", contributionId: "points" },
+      {},
+    );
+    expect(pointMatchesRegions(point, simplified)).toBe(true);
+  });
+});
+

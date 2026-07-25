@@ -2,6 +2,7 @@ import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import type {
   Feature,
   FeatureCollection,
+  MultiPolygon,
   Point,
   Polygon,
 } from "geojson";
@@ -10,11 +11,54 @@ import type {
   HostedPoint,
   PointPredicate,
   PointProperties,
+  RegionGeometry,
+  SurfaceHeatmapData,
+  SurfaceProperties,
 } from "../extensions/api";
 
 export interface NormalizedHeatmap {
   key: string;
   points: HostedPoint[];
+}
+
+export function normalizeSurfaceHeatmap(
+  data: SurfaceHeatmapData,
+): {
+  collection: FeatureCollection<RegionGeometry, SurfaceProperties>;
+  itemCount: number;
+} {
+  if (
+    !data ||
+    !Number.isInteger(data.itemCount) ||
+    data.itemCount < 0 ||
+    !data.collection ||
+    data.collection.type !== "FeatureCollection"
+  ) {
+    throw new Error("Surface heatmap loader returned invalid data.");
+  }
+  const features = data.collection.features.map((feature, index) => {
+    if (
+      !feature ||
+      feature.type !== "Feature" ||
+      !["Polygon", "MultiPolygon"].includes(feature.geometry?.type) ||
+      typeof feature.properties?.weight !== "number" ||
+      !Number.isFinite(feature.properties.weight)
+    ) {
+      throw new Error(`Surface heatmap feature ${index + 1} is invalid.`);
+    }
+    return {
+      ...feature,
+      id: feature.id ?? `surface-${index}`,
+      properties: {
+        ...feature.properties,
+        weight: Math.min(1, Math.max(0, feature.properties.weight)),
+      },
+    };
+  });
+  return {
+    collection: { type: "FeatureCollection", features },
+    itemCount: data.itemCount,
+  };
 }
 
 function validPosition(coordinates: unknown): coordinates is [number, number] {
@@ -84,7 +128,7 @@ export function normalizeHeatmapFeatures(
 
 export function pointMatchesRegions(
   point: HostedPoint,
-  regions: ReadonlyArray<Feature<Polygon>>,
+  regions: ReadonlyArray<Feature<Polygon | MultiPolygon>>,
 ): boolean {
   if (regions.length === 0) return true;
   return regions.some((region) => booleanPointInPolygon(point.feature, region));
@@ -93,7 +137,7 @@ export function pointMatchesRegions(
 export function composePoints(
   points: ReadonlyArray<HostedPoint>,
   predicates: ReadonlyArray<PointPredicate>,
-  regions: ReadonlyArray<Feature<Polygon>>,
+  regions: ReadonlyArray<Feature<Polygon | MultiPolygon>>,
 ): HostedPoint[] {
   return points.filter(
     (point) =>
@@ -119,4 +163,3 @@ export function groupPoints(
 
   return groups;
 }
-

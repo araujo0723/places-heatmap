@@ -9,6 +9,7 @@ import {
 import * as maplibregl from "maplibre-gl";
 import type {
   GeoJSONSource,
+  FillLayerSpecification,
   HeatmapLayerSpecification,
   Map as MapLibreMap,
   StyleSpecification,
@@ -25,11 +26,16 @@ import type { Feature, FeatureCollection, Point, Polygon } from "geojson";
 import {
   composePoints,
   normalizeHeatmapFeatures,
+  normalizeSurfaceHeatmap,
 } from "../core/composition";
+import { clipSurfaceCollection } from "../core/regions";
 import type {
   HostedPoint,
   MapViewport,
   PointPredicate,
+  RegionFeature,
+  RegionGeometry,
+  SurfaceProperties,
 } from "../extensions/api";
 import {
   extensionRegistry,
@@ -45,7 +51,6 @@ interface ActiveFilter {
   state: unknown;
   revision: number;
   randomSeed: number;
-  regionIds: Array<string | number>;
 }
 
 interface ActiveHeatmap {
@@ -59,12 +64,16 @@ interface ActiveHeatmap {
 interface FilterRuntime {
   status: RuntimeStatus;
   predicate?: PointPredicate;
+  regions?: RegionFeature[];
+  regionCount?: number;
   error?: string;
 }
 
 interface HeatmapRuntime {
   status: RuntimeStatus;
   points?: HostedPoint[];
+  surface?: FeatureCollection<RegionGeometry, SurfaceProperties>;
+  itemCount?: number;
   error?: string;
 }
 
@@ -82,6 +91,14 @@ const EMPTY_COLLECTION: FeatureCollection<Point> = {
   type: "FeatureCollection",
   features: [],
 };
+const EMPTY_SURFACE_COLLECTION: FeatureCollection<
+  RegionGeometry,
+  SurfaceProperties
+> = {
+  type: "FeatureCollection",
+  features: [],
+};
+const NEUTRAL_PREDICATE: PointPredicate = () => true;
 
 function readLastLocation(): [number, number] | undefined {
   try {
@@ -117,6 +134,32 @@ function saveLastLocation(longitude: number, latitude: number) {
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "An unknown error occurred.";
+}
+
+function normalizeResolvedRegions(value: unknown) {
+  if (!value || typeof value !== "object") {
+    throw new Error("Filter returned invalid regions.");
+  }
+  const candidate = value as {
+    collection?: FeatureCollection<RegionGeometry>;
+    itemCount?: number;
+  };
+  if (
+    candidate.collection?.type !== "FeatureCollection" ||
+    !candidate.collection.features.every(
+      (feature) =>
+        feature?.type === "Feature" &&
+        ["Polygon", "MultiPolygon"].includes(feature.geometry?.type),
+    ) ||
+    !Number.isInteger(candidate.itemCount) ||
+    (candidate.itemCount ?? -1) < 0
+  ) {
+    throw new Error("Filter returned invalid regions.");
+  }
+  return {
+    regions: candidate.collection.features as RegionFeature[],
+    regionCount: candidate.itemCount as number,
+  };
 }
 
 function safeMapId(key: string) {
@@ -171,6 +214,31 @@ function colorExpression(
   ] as never;
 }
 
+function surfaceColorExpression(
+  ramp: ReadonlyArray<readonly [number, string]> | undefined,
+): FillLayerSpecification["paint"] extends infer Paint
+  ? Paint extends { "fill-color"?: infer Color }
+    ? Color
+    : never
+  : never {
+  const colors =
+    ramp && ramp.length >= 2
+      ? ramp
+      : [
+          [0, "rgba(67, 56, 202, 0)"],
+          [0.3, "#4338ca"],
+          [0.55, "#0891b2"],
+          [0.8, "#facc15"],
+          [1, "#f97316"],
+        ];
+  return [
+    "interpolate",
+    ["linear"],
+    ["get", "weight"],
+    ...colors.flatMap(([stop, color]) => [stop, color]),
+  ] as never;
+}
+
 function SectionHeading({
   title,
   count,
@@ -221,7 +289,9 @@ function Status({
   if (runtime.status === "error") {
     const hasStaleValue =
       ("predicate" in runtime && !!runtime.predicate) ||
-      ("points" in runtime && !!runtime.points);
+      ("regions" in runtime && !!runtime.regions) ||
+      ("points" in runtime && !!runtime.points) ||
+      ("surface" in runtime && !!runtime.surface);
 
     return (
       <div className="flex items-center gap-2">
@@ -307,6 +377,9 @@ export default function MapWorkspace() {
   const renderedLayerKeysRef = useRef(new Set<string>());
   const contributionInstanceRef = useRef(0);
   const lastLocationRef = useRef(readLastLocation());
+  const viewportTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
 
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string>();
@@ -317,6 +390,7 @@ export default function MapWorkspace() {
   >(lastLocationRef.current ? "cached" : "locating");
   const [drawMode, setDrawMode] = useState<"select" | "freehand">("select");
   const [regions, setRegions] = useState<Array<Feature<Polygon>>>([]);
+  const [viewportRevision, setViewportRevision] = useState(0);
   const [selectedRegionIds, setSelectedRegionIds] = useState<
     Array<string | number>
   >([]);
@@ -486,11 +560,20 @@ export default function MapWorkspace() {
       const onError = (event: maplibregl.ErrorEvent) => {
         if (!map.loaded()) setMapError(event.error?.message ?? "Map failed to load.");
       };
+      const onMoveEnd = () => {
+        if (viewportTimerRef.current) clearTimeout(viewportTimerRef.current);
+        viewportTimerRef.current = setTimeout(
+          () => setViewportRevision((revision) => revision + 1),
+          400,
+        );
+      };
 
       map.on("load", onLoad);
       map.on("error", onError);
+      map.on("moveend", onMoveEnd);
 
       return () => {
+        if (viewportTimerRef.current) clearTimeout(viewportTimerRef.current);
         drawRef.current?.stop();
         drawRef.current = null;
         map.remove();
@@ -521,14 +604,30 @@ export default function MapWorkspace() {
     );
 
     for (const selection of activeFilters) {
-      Promise.resolve(
-        selection.entry.contribution.resolvePredicate(selection.state, {
-          signal: controller.signal,
-          viewport: currentViewport(),
-          randomSeed: selection.randomSeed,
-        }),
-      )
-        .then((predicate) => {
+      const context = {
+        signal: controller.signal,
+        viewport: currentViewport(),
+        randomSeed: selection.randomSeed,
+      };
+      const predicatePromise = selection.entry.contribution.resolvePredicate
+        ? Promise.resolve(
+            selection.entry.contribution.resolvePredicate(
+              selection.state,
+              context,
+            ),
+          )
+        : Promise.resolve(NEUTRAL_PREDICATE);
+      const regionsPromise = selection.entry.contribution.resolveRegions
+        ? Promise.resolve(
+            selection.entry.contribution.resolveRegions(
+              selection.state,
+              context,
+            ),
+          ).then(normalizeResolvedRegions)
+        : Promise.resolve({ regions: [] as RegionFeature[], regionCount: 0 });
+
+      Promise.all([predicatePromise, regionsPromise])
+        .then(([predicate, resolvedRegions]) => {
           if (
             controller.signal.aborted ||
             !activeKeys.has(selection.instanceId)
@@ -539,7 +638,11 @@ export default function MapWorkspace() {
           }
           setFilterRuntime((current) => ({
             ...current,
-            [selection.instanceId]: { status: "ready", predicate },
+            [selection.instanceId]: {
+              status: "ready",
+              predicate,
+              ...resolvedRegions,
+            },
           }));
         })
         .catch((error) => {
@@ -556,7 +659,7 @@ export default function MapWorkspace() {
     }
 
     return () => controller.abort();
-  }, [activeFilters]);
+  }, [activeFilters, viewportRevision]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -578,23 +681,36 @@ export default function MapWorkspace() {
     );
 
     for (const selection of activeHeatmaps) {
-      selection.entry.contribution
-        .load(selection.state, {
-          signal: controller.signal,
-          viewport: currentViewport(),
-          randomSeed: selection.randomSeed,
-        })
-        .then((collection) =>
-          normalizeHeatmapFeatures(
-            collection,
-            {
-              extensionId: selection.entry.extension.id,
-              contributionId: selection.entry.contribution.id,
-            },
-            selection.entry.contribution.style,
-          ),
-        )
-        .then((points) => {
+      const contribution = selection.entry.contribution;
+      const context = {
+        signal: controller.signal,
+        viewport: currentViewport(),
+        randomSeed: selection.randomSeed,
+      };
+      const load =
+        contribution.kind === "surface"
+          ? contribution
+              .load(selection.state, context)
+              .then(normalizeSurfaceHeatmap)
+              .then(({ collection: surface, itemCount }) => ({
+                surface,
+                itemCount,
+              }))
+          : contribution
+              .load(selection.state, context)
+              .then((collection) => ({
+                points: normalizeHeatmapFeatures(
+                  collection,
+                  {
+                    extensionId: selection.entry.extension.id,
+                    contributionId: contribution.id,
+                  },
+                  contribution.style,
+                ),
+                itemCount: collection.features.length,
+              }));
+      load
+        .then((result) => {
           if (
             controller.signal.aborted ||
             !activeKeys.has(selection.instanceId)
@@ -602,7 +718,7 @@ export default function MapWorkspace() {
             return;
           setHeatmapRuntime((current) => ({
             ...current,
-            [selection.instanceId]: { status: "ready", points },
+            [selection.instanceId]: { status: "ready", ...result },
           }));
         })
         .catch((error) => {
@@ -619,7 +735,7 @@ export default function MapWorkspace() {
     }
 
     return () => controller.abort();
-  }, [activeHeatmaps]);
+  }, [activeHeatmaps, viewportRevision]);
 
   const predicates = useMemo(
     () =>
@@ -627,6 +743,26 @@ export default function MapWorkspace() {
         .map(({ instanceId }) => filterRuntime[instanceId]?.predicate)
         .filter((predicate): predicate is PointPredicate => !!predicate),
     [activeFilters, filterRuntime],
+  );
+  const ownedRegions = useMemo(
+    () =>
+      activeFilters.flatMap(
+        ({ instanceId }) => filterRuntime[instanceId]?.regions ?? [],
+      ),
+    [activeFilters, filterRuntime],
+  );
+  const ownedRegionCount = useMemo(
+    () =>
+      activeFilters.reduce(
+        (count, { instanceId }) =>
+          count + (filterRuntime[instanceId]?.regionCount ?? 0),
+        0,
+      ),
+    [activeFilters, filterRuntime],
+  );
+  const allRegions = useMemo<RegionFeature[]>(
+    () => [...regions, ...ownedRegions],
+    [ownedRegions, regions],
   );
 
   const filtersBlocked = activeFilters.some(
@@ -641,7 +777,7 @@ export default function MapWorkspace() {
         type: "FeatureCollection",
         features: filtersBlocked
           ? []
-          : composePoints(points, predicates, regions).map(
+          : composePoints(points, predicates, allRegions).map(
               ({ feature }) => feature,
             ),
       });
@@ -652,12 +788,26 @@ export default function MapWorkspace() {
     filtersBlocked,
     heatmapRuntime,
     predicates,
-    regions,
+    allRegions,
   ]);
+
+  const surfaceCollections = useMemo(() => {
+    const groups = new Map<
+      string,
+      FeatureCollection<RegionGeometry, SurfaceProperties>
+    >();
+    for (const { instanceId, entry } of activeHeatmaps) {
+      if (entry.contribution.kind !== "surface") continue;
+      const surface =
+        heatmapRuntime[instanceId]?.surface ?? EMPTY_SURFACE_COLLECTION;
+      groups.set(instanceId, clipSurfaceCollection(surface, allRegions));
+    }
+    return groups;
+  }, [activeHeatmaps, allRegions, heatmapRuntime]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady || !map.isStyleLoaded()) return;
+    if (!map || !mapReady) return;
 
     const desiredKeys = new Set(
       activeHeatmaps.map(({ instanceId }) => instanceId),
@@ -667,8 +817,10 @@ export default function MapWorkspace() {
       const safeKey = safeMapId(key);
       const layerId = `extension-heatmap-${safeKey}`;
       const pointLayerId = `extension-points-${safeKey}`;
+      const surfaceLayerId = `extension-surface-${safeKey}`;
       const sourceId = `extension-source-${safeKey}`;
       if (map.getLayer(pointLayerId)) map.removeLayer(pointLayerId);
+      if (map.getLayer(surfaceLayerId)) map.removeLayer(surfaceLayerId);
       if (map.getLayer(layerId)) map.removeLayer(layerId);
       if (map.getSource(sourceId)) map.removeSource(sourceId);
       renderedLayerKeysRef.current.delete(key);
@@ -677,8 +829,12 @@ export default function MapWorkspace() {
     for (const { entry, instanceId } of activeHeatmaps) {
       const safeKey = safeMapId(instanceId);
       const layerId = `extension-heatmap-${safeKey}`;
+      const surfaceLayerId = `extension-surface-${safeKey}`;
       const sourceId = `extension-source-${safeKey}`;
-      const data = groupedPoints.get(instanceId) ?? EMPTY_COLLECTION;
+      const isSurface = entry.contribution.kind === "surface";
+      const data = isSurface
+        ? (surfaceCollections.get(instanceId) ?? EMPTY_SURFACE_COLLECTION)
+        : (groupedPoints.get(instanceId) ?? EMPTY_COLLECTION);
       const existingSource = map.getSource(sourceId) as GeoJSONSource | undefined;
 
       if (existingSource) {
@@ -687,7 +843,29 @@ export default function MapWorkspace() {
         map.addSource(sourceId, { type: "geojson", data });
       }
 
-      if (!map.getLayer(layerId)) {
+      if (isSurface && !map.getLayer(surfaceLayerId)) {
+        const style = entry.contribution.style;
+        const beforeId = map.getLayer("regions-polygon")
+          ? "regions-polygon"
+          : undefined;
+        map.addLayer(
+          {
+            id: surfaceLayerId,
+            source: sourceId,
+            type: "fill",
+            layout: {
+              "fill-sort-key": ["get", "weight"],
+            },
+            paint: {
+              "fill-color": surfaceColorExpression(style.colorRamp),
+              "fill-opacity": style.opacity ?? 0.8,
+              "fill-outline-color": "rgba(0, 0, 0, 0)",
+            },
+          },
+          beforeId,
+        );
+      }
+      if (!isSurface && !map.getLayer(layerId)) {
         const style = entry.contribution.style;
         const layer: HeatmapLayerSpecification = {
           id: layerId,
@@ -707,7 +885,7 @@ export default function MapWorkspace() {
         map.addLayer(layer, beforeId);
       }
       const pointLayerId = `extension-points-${safeKey}`;
-      if (!map.getLayer(pointLayerId)) {
+      if (!isSurface && !map.getLayer(pointLayerId)) {
         const beforeId = map.getLayer("regions-polygon")
           ? "regions-polygon"
           : undefined;
@@ -739,79 +917,57 @@ export default function MapWorkspace() {
 
       renderedLayerKeysRef.current.add(instanceId);
     }
-  }, [activeHeatmaps, groupedPoints, mapReady]);
+  }, [activeHeatmaps, groupedPoints, mapReady, surfaceCollections]);
 
-  const randomRegions = (seed: number) => {
-    const draw = drawRef.current;
-    if (!draw) return [];
-
-    let value = seed >>> 0;
-    const random = () => {
-      value += 0x6d2b79f5;
-      let result = value;
-      result = Math.imul(result ^ (result >>> 15), result | 1);
-      result ^= result + Math.imul(result ^ (result >>> 7), result | 61);
-      return ((result ^ (result >>> 14)) >>> 0) / 4294967296;
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const sourceId = "filter-owned-regions-source";
+    const fillLayerId = "filter-owned-regions-fill";
+    const lineLayerId = "filter-owned-regions-line";
+    const collection: FeatureCollection<RegionGeometry> = {
+      type: "FeatureCollection",
+      features: ownedRegions,
     };
-    const viewport = currentViewport();
-    const { west, south, east, north } = viewport.bounds;
-    const longitudeSpan = Math.max(east - west, 0.01);
-    const latitudeSpan = Math.max(north - south, 0.01);
-    const features = Array.from({ length: 3 }, (_, regionIndex) => {
-      const centerLongitude =
-        viewport.center[0] + (random() - 0.5) * longitudeSpan * 0.5;
-      const centerLatitude =
-        viewport.center[1] + (random() - 0.5) * latitudeSpan * 0.5;
-      const vertexCount = 7 + Math.floor(random() * 4);
-      const coordinates = Array.from({ length: vertexCount }, (_, index) => {
-        const angle = (index / vertexCount) * Math.PI * 2;
-        const radius = 0.12 + random() * 0.1;
-        const longitude = Math.min(
-          east,
-          Math.max(
-            west,
-            centerLongitude + Math.cos(angle) * longitudeSpan * radius,
-          ),
-        );
-        const latitude = Math.min(
-          north,
-          Math.max(
-            south,
-            centerLatitude + Math.sin(angle) * latitudeSpan * radius,
-          ),
-        );
-        return [
-          Number(longitude.toFixed(6)),
-          Number(latitude.toFixed(6)),
-        ] as [number, number];
-      });
-      coordinates.push(coordinates[0]);
-      return {
-        type: "Feature" as const,
-        id: draw.getFeatureId(),
-        properties: {
-          mode: "freehand",
-          generated: true,
-          regionIndex,
+    const source = map.getSource(sourceId) as GeoJSONSource | undefined;
+    if (source) {
+      source.setData(collection);
+    } else {
+      map.addSource(sourceId, { type: "geojson", data: collection });
+    }
+    const beforeId = map.getLayer("regions-polygon")
+      ? "regions-polygon"
+      : undefined;
+    if (!map.getLayer(fillLayerId)) {
+      map.addLayer(
+        {
+          id: fillLayerId,
+          source: sourceId,
+          type: "fill",
+          paint: {
+            "fill-color": "#16a34a",
+            "fill-opacity": 0.16,
+          },
         },
-        geometry: {
-          type: "Polygon" as const,
-          coordinates: [coordinates],
+        beforeId,
+      );
+    }
+    if (!map.getLayer(lineLayerId)) {
+      map.addLayer(
+        {
+          id: lineLayerId,
+          source: sourceId,
+          type: "line",
+          paint: {
+            "line-color": "#15803d",
+            "line-width": 2,
+            "line-opacity": 0.8,
+          },
         },
-      };
-    });
-    const validations = draw.addFeatures(features);
-    const validIds = features
-      .filter((_, index) => validations[index]?.valid)
-      .map(({ id }) => id as string | number);
-    setRegions(
-      draw
-        .getSnapshot()
-        .filter((feature) => feature.geometry.type === "Polygon")
-        .map((feature) => feature as Feature<Polygon>),
-    );
-    return validIds;
-  };
+        beforeId,
+      );
+    }
+  }, [mapReady, ownedRegions]);
 
   const addFilter = (key: string) => {
     const entry = extensionRegistry.filters.find(
@@ -820,7 +976,6 @@ export default function MapWorkspace() {
     if (!entry) return;
     contributionInstanceRef.current += 1;
     const randomSeed = Math.floor(Math.random() * 2_147_483_647);
-    const regionIds = randomRegions(randomSeed);
     setActiveFilters((current) => [
       ...current,
       {
@@ -829,7 +984,6 @@ export default function MapWorkspace() {
         state: entry.contribution.initialState,
         revision: 0,
         randomSeed,
-        regionIds,
       },
     ]);
   };
@@ -1061,7 +1215,7 @@ export default function MapWorkspace() {
           <section className="space-y-3" aria-labelledby="regions-heading">
             <SectionHeading
               title="Regions"
-              count={regions.length}
+              count={regions.length + ownedRegionCount}
               countTestId="region-count"
             />
             <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
@@ -1113,6 +1267,13 @@ export default function MapWorkspace() {
                 <p className="mt-3 text-[11px] leading-4 text-slate-500">
                   Press and drag on the map to trace a region. Map panning is
                   paused.
+                </p>
+              ) : null}
+              {ownedRegionCount > 0 ? (
+                <p className="mt-3 text-[11px] leading-4 text-slate-500">
+                  {ownedRegionCount} filter-owned{" "}
+                  {ownedRegionCount === 1 ? "region is" : "regions are"} managed
+                  by active filters and cannot be edited here.
                 </p>
               ) : null}
             </div>
@@ -1168,26 +1329,6 @@ export default function MapWorkspace() {
                             className="rounded-md px-1.5 py-0.5 text-lg leading-none text-slate-300 hover:bg-slate-100 hover:text-slate-600 focus:ring-2 focus:ring-slate-300 focus:outline-none"
                             type="button"
                             onClick={() => {
-                              const draw = drawRef.current;
-                              const existingRegionIds =
-                                selection.regionIds.filter((id) =>
-                                  draw?.hasFeature(id),
-                                );
-                              if (existingRegionIds.length) {
-                                draw?.removeFeatures(existingRegionIds);
-                              }
-                              setRegions(
-                                draw
-                                  ?.getSnapshot()
-                                  .filter(
-                                    (feature) =>
-                                      feature.geometry.type === "Polygon",
-                                  )
-                                  .map(
-                                    (feature) =>
-                                      feature as Feature<Polygon>,
-                                  ) ?? [],
-                              );
                               setActiveFilters((current) =>
                                 current.filter(
                                   (item) =>
@@ -1375,10 +1516,12 @@ export default function MapWorkspace() {
                 key={instanceId}
                 className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-xs font-medium text-white shadow-lg shadow-slate-950/25"
               >
-                <span className="h-2 w-2 rounded-full bg-indigo-400" />
+                <span className="h-2 w-2 rounded-full bg-green-500" />
                 {entry.contribution.name}
                 <span className="text-slate-400">
-                  {groupedPoints.get(instanceId)?.features.length ?? 0}
+                  {entry.contribution.kind === "surface"
+                    ? (heatmapRuntime[instanceId]?.itemCount ?? 0)
+                    : (groupedPoints.get(instanceId)?.features.length ?? 0)}
                 </span>
               </div>
             ))}

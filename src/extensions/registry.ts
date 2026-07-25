@@ -44,14 +44,18 @@ function validateContribution(
   if (kind === "filter") {
     return (
       typeof candidate.Controls === "function" &&
-      typeof candidate.resolvePredicate === "function"
+      (typeof candidate.resolvePredicate === "function" ||
+        typeof candidate.resolveRegions === "function")
     );
   }
 
   return (
     typeof candidate.load === "function" &&
     !!candidate.style &&
-    typeof candidate.style === "object"
+    typeof candidate.style === "object" &&
+    (candidate.kind === undefined ||
+      candidate.kind === "points" ||
+      candidate.kind === "surface")
   );
 }
 
@@ -168,4 +172,3 @@ export function createExtensionRegistry(
 const extensionModules = import.meta.glob("./*/index.tsx", { eager: true });
 
 export const extensionRegistry = createExtensionRegistry(extensionModules);
-

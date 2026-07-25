@@ -70,5 +70,36 @@ describe("extension registry", () => {
     expect(registry.extensions).toEqual([]);
     expect(registry.diagnostics[0]).toContain("repeats contribution id");
   });
-});
 
+  it("accepts region-only filters and surface heatmaps", () => {
+    const extension = validExtension("geometries");
+    extension.filters[0] = {
+      id: "regions",
+      name: "Regions",
+      initialState: {},
+      Controls,
+      resolveRegions: () => ({
+        collection: { type: "FeatureCollection", features: [] },
+        itemCount: 0,
+      }),
+    } as never;
+    extension.heatmaps[0] = {
+      kind: "surface",
+      id: "surface",
+      name: "Surface",
+      initialState: {},
+      load: async () => ({
+        collection: { type: "FeatureCollection", features: [] },
+        itemCount: 0,
+      }),
+      style: {},
+    } as never;
+
+    const registry = createExtensionRegistry({
+      "./geometries/index.tsx": { default: extension },
+    });
+    expect(registry.filters).toHaveLength(1);
+    expect(registry.heatmaps).toHaveLength(1);
+    expect(registry.diagnostics).toEqual([]);
+  });
+});

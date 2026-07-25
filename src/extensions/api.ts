@@ -1,5 +1,11 @@
 import type { ComponentType } from "react";
-import type { Feature, FeatureCollection, Point } from "geojson";
+import type {
+  Feature,
+  FeatureCollection,
+  MultiPolygon,
+  Point,
+  Polygon,
+} from "geojson";
 
 export type PointProperties = Record<string, unknown> & { weight: number };
 
@@ -12,6 +18,13 @@ export interface HostedPoint {
 }
 
 export type PointPredicate = (point: HostedPoint) => boolean;
+export type RegionGeometry = Polygon | MultiPolygon;
+export type RegionFeature = Feature<RegionGeometry>;
+
+export interface ResolvedRegions {
+  collection: FeatureCollection<RegionGeometry>;
+  itemCount: number;
+}
 
 export interface MapViewport {
   center: [number, number];
@@ -41,10 +54,14 @@ export interface FilterContribution<State = unknown> {
   name: string;
   initialState: State;
   Controls: ComponentType<ControlProps<State>>;
-  resolvePredicate: (
+  resolvePredicate?: (
     state: State,
     context: ContributionContext,
   ) => PointPredicate | Promise<PointPredicate>;
+  resolveRegions?: (
+    state: State,
+    context: ContributionContext,
+  ) => ResolvedRegions | Promise<ResolvedRegions>;
 }
 
 export interface HeatmapStyle {
@@ -55,17 +72,44 @@ export interface HeatmapStyle {
   colorRamp?: ReadonlyArray<readonly [number, string]>;
 }
 
-export interface HeatmapContribution<State = unknown> {
+interface BaseHeatmapContribution<State> {
   id: string;
   name: string;
   initialState: State;
   Controls?: ComponentType<ControlProps<State>>;
+  style: HeatmapStyle;
+}
+
+export interface PointHeatmapContribution<State = unknown>
+  extends BaseHeatmapContribution<State> {
+  kind?: "points";
   load: (
     state: State,
     context: ContributionContext,
   ) => Promise<FeatureCollection<Point>>;
-  style: HeatmapStyle;
 }
+
+export interface SurfaceProperties extends Record<string, unknown> {
+  weight: number;
+}
+
+export interface SurfaceHeatmapData {
+  collection: FeatureCollection<RegionGeometry, SurfaceProperties>;
+  itemCount: number;
+}
+
+export interface SurfaceHeatmapContribution<State = unknown>
+  extends BaseHeatmapContribution<State> {
+  kind: "surface";
+  load: (
+    state: State,
+    context: ContributionContext,
+  ) => Promise<SurfaceHeatmapData>;
+}
+
+export type HeatmapContribution<State = unknown> =
+  | PointHeatmapContribution<State>
+  | SurfaceHeatmapContribution<State>;
 
 export interface MapExtension {
   apiVersion: 1;

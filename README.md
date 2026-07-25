@@ -7,9 +7,7 @@ a React client island.
 On startup, the map requests browser geolocation and centers on the user's
 region when permission is granted. The last successful location is stored in
 local browser storage and used as the initial camera position on later visits,
-while a fresh location is requested. The bundled random explorer snapshots the
-current viewport when a heatmap is added, so generated results stay around the
-area the user is currently viewing.
+while a fresh location is requested.
 
 ## Development
 
@@ -60,8 +58,25 @@ npm run test:e2e
 
 The app uses the public OpenStreetMap raster endpoint for development. Copy
 `.env.example` to `.env` to select another compatible tile endpoint and
-attribution. Production deployments should use a tile service sized for their
-traffic.
+attribution and configure the nearby-parks cache:
+
+```sh
+REDIS_URL=redis://localhost:6379
+```
+
+Park lookups fall back to an in-process cache and live Overpass requests when
+Redis is unavailable. `OVERPASS_API_URL` can select another compatible
+interpreter. When `ORS_API_KEY` is set, openrouteservice supplies center-only
+park records if Overpass is temporarily overloaded. Production deployments
+should use map and Overpass services sized for their traffic.
+
+The production build uses Astro's standalone Node adapter. The page shell stays
+prerendered while `/api/parks` runs on the server:
+
+```sh
+npm run build
+npm start
+```
 
 ## Extensions
 
@@ -83,11 +98,12 @@ export default defineExtension({
 });
 ```
 
-Filter contributions provide a settings component and resolve a pure point
-predicate. Heatmap contributions asynchronously load a GeoJSON point collection
-and provide declarative heatmap styling. Both receive the current viewport and
-a stable per-instance random seed. See
-`src/extensions/demo-places/index.tsx` for a working contribution of each type.
+Filter contributions provide a settings component and can resolve a pure point
+predicate, filter-owned regions, or both. Heatmap contributions load either
+GeoJSON points or weighted polygon surfaces and provide declarative styling.
+Both receive the current viewport and a stable per-instance random seed. See
+`src/extensions/nearby-parks/index.tsx` for a working region filter and surface
+heatmap.
 
 Extensions never receive the MapLibre instance. The host validates data,
 composes all active predicates with the drawn-region constraint, and owns map
@@ -96,11 +112,26 @@ source/layer lifecycle.
 ## Filter behavior
 
 - Active extension filters combine with AND semantics.
-- Adding the bundled random filter draws three generated regions around the
-  current map focus; removing that filter removes its generated regions.
+- Region-producing filters add host-rendered, non-editable regions. Their
+  controls replace those regions, and removing the filter removes them.
 - Multiple drawn polygons combine as a union.
-- The region union is ANDed with all extension filters.
+- Drawn and filter-owned regions form a union which is ANDed with point
+  predicates.
 - Select **Draw region**, then press and drag on the map to trace a freehand
   polygon. Map panning is suspended until the polygon is finished.
 - With no regions, the region constraint is neutral.
-- Settings and drawn regions are intentionally session-only in this increment.
+- **Clear all** and **Delete selected** affect manually drawn regions only.
+- Settings and regions are intentionally session-only in this increment.
+
+## Nearby parks
+
+The bundled Nearby parks extension queries OpenStreetMap `leisure=park` objects
+for the visible map plus 5 km. It refreshes after settled map movement and
+shares six-hour, zoom-11 tile caches between its filter and heatmap.
+
+- **Park distance** creates a bbox-expanded or circular filter region for every
+  park, from 0 to 2,000 m.
+- **Park influence** renders a full-strength park core and twelve geographic
+  contour bands fading to zero at 300 m.
+- Views covering more than 25 cache tiles retain stale data and ask the user to
+  zoom in.

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { defineConfig } from "astro/config";
 import react from "@astrojs/react";
+import node from "@astrojs/node";
 import basicSsl from "@vitejs/plugin-basic-ssl";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -39,6 +40,7 @@ const basicSslDomains = [
 ];
 
 export default defineConfig({
+  adapter: node({ mode: "standalone" }),
   integrations: [react()],
   devToolbar: {
     enabled: false,

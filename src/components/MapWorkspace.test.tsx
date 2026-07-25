@@ -15,17 +15,20 @@ vi.mock("maplibre-gl", () => {
 
   class MockMap {
     static lastOptions: unknown;
+    static lastInstance: MockMap;
     private handlers = new Map<string, Array<(...args: any[]) => void>>();
     private sources = new Map<string, MockSource>();
     private layers = new Map<string, unknown>();
     private canvas = document.createElement("canvas");
     private center = { lng: -0.115, lat: 51.512 };
+    private styleLoaded = true;
     dragRotate = { isEnabled: () => false, enable: vi.fn(), disable: vi.fn() };
     dragPan = { isEnabled: () => true, enable: vi.fn(), disable: vi.fn() };
     doubleClickZoom = { enable: vi.fn(), disable: vi.fn() };
 
     constructor(options: any) {
       MockMap.lastOptions = options;
+      MockMap.lastInstance = this;
       this.center = {
         lng: options.center[0],
         lat: options.center[1],
@@ -48,6 +51,9 @@ vi.mock("maplibre-gl", () => {
     getCenter() {
       return this.center;
     }
+    setCenter(center: [number, number]) {
+      this.center = { lng: center[0], lat: center[1] };
+    }
     getBounds() {
       const { lng, lat } = this.center;
       return {
@@ -61,7 +67,10 @@ vi.mock("maplibre-gl", () => {
       return true;
     }
     isStyleLoaded() {
-      return true;
+      return this.styleLoaded;
+    }
+    setStyleLoaded(value: boolean) {
+      this.styleLoaded = value;
     }
     addSource(id: string, specification: { data: unknown }) {
       this.sources.set(id, new MockSource(specification.data));
@@ -166,10 +175,16 @@ vi.mock("terra-draw", () => {
 
 import MapWorkspace from "./MapWorkspace";
 import { Map as MapLibreMap } from "maplibre-gl";
+import { clearNearbyParkCache } from "../extensions/nearby-parks/data";
 
 describe("MapWorkspace", () => {
   beforeEach(() => {
     localStorage.clear();
+    clearNearbyParkCache();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("shows the region preview while the pointer is still down", async () => {
@@ -228,102 +243,159 @@ describe("MapWorkspace", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("keeps enabled contributions inactive until added and composes them", async () => {
-    const user = userEvent.setup();
+  it("exposes only the nearby-parks contributions", async () => {
     render(<MapWorkspace />);
 
     expect(await screen.findByText("Centered near you")).toBeInTheDocument();
     expect(screen.getByText("No active filters")).toBeInTheDocument();
     expect(screen.getByText("No active heatmaps")).toBeInTheDocument();
-    expect(screen.queryByText("Places workspace")).not.toBeInTheDocument();
-    expect(screen.queryByText("Explore the map")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Filter")).toHaveTextContent(
+      "Nearby parks · Park distance",
+    );
+    expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
+      "Nearby parks · Park influence",
+    );
+    expect(screen.queryByText(/demo-places/i)).not.toBeInTheDocument();
+  });
+
+  it("renders park layers immediately while the base style is busy, then refreshes after movement", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        tiles: [],
+        parks: [
+          {
+            id: "way/1",
+            name: "Box Park",
+            center: [-0.115, 51.512],
+            bbox: {
+              west: -0.12,
+              south: 51.51,
+              east: -0.11,
+              north: 51.515,
+            },
+          },
+          {
+            id: "node/2",
+            name: "Point Park",
+            center: [-0.1, 51.52],
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    const filterSelector = await screen.findByLabelText("Filter");
+    const map = (
+      MapLibreMap as unknown as {
+        lastInstance: {
+          emit(name: string): void;
+          getLayer(id: string): unknown;
+          setCenter(center: [number, number]): void;
+          setStyleLoaded(value: boolean): void;
+        };
+      }
+    ).lastInstance;
+    map.setStyleLoaded(false);
+
+    await user.selectOptions(
+      filterSelector,
+      "nearby-parks/distance",
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("region-count")).toHaveTextContent("2"),
+    );
+    expect(screen.getByText(/2 filter-owned regions/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Clear all" })).toBeDisabled();
+
+    fireEvent.change(screen.getByRole("slider", { name: "Park distance" }), {
+      target: { value: "0" },
+    });
+    await waitFor(
+      () => expect(screen.getByTestId("region-count")).toHaveTextContent("1"),
+      { timeout: 2_000 },
+    );
 
     await user.selectOptions(
       screen.getByLabelText("Heatmap"),
-      "demo-places/density",
+      "nearby-parks/influence",
     );
-
-    await waitFor(() =>
-      expect(screen.getByTestId("map-active-summary")).toHaveTextContent(
-        "Random heatmap140",
-      ),
+    await waitFor(
+      () =>
+        expect(screen.getByTestId("map-active-summary")).toHaveTextContent(
+          "Park influence2",
+        ),
+      { timeout: 5_000 },
     );
-    expect(screen.getAllByText("Random heatmap")).toHaveLength(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
-    await user.selectOptions(
-      screen.getByLabelText("Filter"),
-      "demo-places/minimum-weight",
-    );
-    expect(await screen.findByText("Random area filter")).toBeInTheDocument();
-    expect(screen.getByTestId("region-count")).toHaveTextContent("3");
-
-    fireEvent.change(screen.getByRole("slider", { name: "Random coverage" }), {
-      target: { value: "10" },
+    expect(map.getLayer("filter-owned-regions-fill")).toMatchObject({
+      paint: {
+        "fill-color": "#16a34a",
+      },
     });
-    await waitFor(() =>
-      expect(screen.getByTestId("map-active-summary")).not.toHaveTextContent(
-        "Random heatmap140",
-      ),
-    );
+    expect(map.getLayer("filter-owned-regions-line")).toMatchObject({
+      paint: {
+        "line-color": "#15803d",
+      },
+    });
+    expect(map.getLayer("extension-surface-heatmap-2")).toMatchObject({
+      paint: {
+        "fill-color": [
+          "interpolate",
+          ["linear"],
+          ["get", "weight"],
+          0,
+          "rgba(22, 163, 74, 0)",
+          1,
+          "rgba(22, 163, 74, 1)",
+        ],
+      },
+    });
 
-    await user.click(
-      screen.getByRole("button", { name: "Remove Random area filter" }),
-    );
-    await waitFor(() =>
-      expect(screen.getByTestId("map-active-summary")).toHaveTextContent(
-        "Random heatmap140",
-      ),
-    );
-    expect(screen.getByTestId("region-count")).toHaveTextContent("0");
-
-    await user.click(
-      screen.getByRole("button", { name: "Remove Random heatmap" }),
-    );
-    expect(screen.queryByTestId("map-active-summary")).not.toBeInTheDocument();
+    map.setStyleLoaded(true);
+    map.setCenter([1, 52]);
+    map.emit("moveend");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), {
+      timeout: 3_000,
+    });
   });
 
-  it("adds duplicate contributions as independent instances", async () => {
+  it("allows duplicate park heatmap instances", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          tiles: [],
+          parks: [],
+        }),
+      ),
+    );
     const user = userEvent.setup();
     render(<MapWorkspace />);
 
     const selector = await screen.findByLabelText("Heatmap");
-    await user.selectOptions(selector, "demo-places/density");
-    await user.selectOptions(selector, "demo-places/density");
+    await user.selectOptions(selector, "nearby-parks/influence");
+    await user.selectOptions(selector, "nearby-parks/influence");
 
     await waitFor(() =>
       expect(
         screen.getAllByRole("button", {
-          name: "Remove Random heatmap",
+          name: "Remove Park influence",
         }),
       ).toHaveLength(2),
     );
-    expect(screen.getAllByText("Random heatmap")).toHaveLength(4);
 
     await user.click(
       screen.getAllByRole("button", {
-        name: "Remove Random heatmap",
+        name: "Remove Park influence",
       })[0],
     );
     expect(
       screen.getAllByRole("button", {
-        name: "Remove Random heatmap",
+        name: "Remove Park influence",
       }),
-    ).toHaveLength(1);
-
-    const filterSelector = screen.getByLabelText("Filter");
-    await user.selectOptions(filterSelector, "demo-places/minimum-weight");
-    await user.selectOptions(filterSelector, "demo-places/minimum-weight");
-    expect(
-      screen.getAllByRole("slider", { name: "Random coverage" }),
-    ).toHaveLength(2);
-
-    await user.click(
-      screen.getAllByRole("button", {
-        name: "Remove Random area filter",
-      })[0],
-    );
-    expect(
-      screen.getAllByRole("slider", { name: "Random coverage" }),
     ).toHaveLength(1);
   });
 
