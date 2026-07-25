@@ -17,7 +17,7 @@ import type {
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
   TerraDraw,
-  TerraDrawFreehandMode,
+  TerraDrawRectangleMode,
   TerraDrawSelectMode,
   type GeoJSONStoreFeatures,
 } from "terra-draw";
@@ -439,7 +439,7 @@ export default function MapWorkspace() {
   const [locationStatus, setLocationStatus] = useState<
     "cached" | "locating" | "located" | "unavailable"
   >(lastLocationRef.current ? "cached" : "locating");
-  const [drawMode, setDrawMode] = useState<"select" | "freehand">("select");
+  const [drawMode, setDrawMode] = useState<"select" | "rectangle">("select");
   const [areaOfInterest, setAreaOfInterest] = useState<Feature<Polygon>>();
   const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
@@ -542,10 +542,8 @@ export default function MapWorkspace() {
             prefixId: "regions",
           }),
           modes: [
-            new TerraDrawFreehandMode({
+            new TerraDrawRectangleMode({
               drawInteraction: "click-drag",
-              minDistance: 8,
-              smoothing: 0.15,
               styles: {
                 fillColor: "#64748b",
                 fillOpacity: 0,
@@ -563,13 +561,11 @@ export default function MapWorkspace() {
                 selectedPolygonOutlineWidth: 1,
               },
               flags: {
-                freehand: {
+                rectangle: {
                   feature: {
                     draggable: true,
                     coordinates: {
-                      draggable: true,
-                      deletable: true,
-                      midpoints: true,
+                      resizable: "opposite-fixed",
                     },
                   },
                 },
@@ -1224,7 +1220,7 @@ export default function MapWorkspace() {
     drawDraftRef.current = [];
     setDrawDraft([]);
     setDrawError(undefined);
-    setDrawMode("freehand");
+    setDrawMode("rectangle");
   };
   const drawPointFromEvent = (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -1252,7 +1248,7 @@ export default function MapWorkspace() {
     event: ReactPointerEvent<HTMLDivElement>,
   ) => {
     if (
-      drawMode !== "freehand" ||
+      drawMode !== "rectangle" ||
       !event.isPrimary ||
       event.button !== 0
     ) {
@@ -1271,15 +1267,10 @@ export default function MapWorkspace() {
   ) => {
     if (activeDrawPointerRef.current !== event.pointerId) return;
     const point = drawPointFromEvent(event);
-    const previous = drawDraftRef.current.at(-1);
-    if (
-      !point ||
-      (previous && Math.hypot(point.x - previous.x, point.y - previous.y) < 4)
-    ) {
-      return;
-    }
+    const start = drawDraftRef.current[0];
+    if (!point || !start) return;
     event.preventDefault();
-    updateDrawDraft([...drawDraftRef.current, point]);
+    updateDrawDraft([start, point]);
   };
   const onDrawPointerUp = (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -1289,34 +1280,38 @@ export default function MapWorkspace() {
     event.currentTarget.releasePointerCapture(event.pointerId);
     activeDrawPointerRef.current = undefined;
 
-    const finalPoint = drawPointFromEvent(event);
-    const previous = drawDraftRef.current.at(-1);
-    const points =
-      finalPoint &&
-      (!previous ||
-        Math.hypot(finalPoint.x - previous.x, finalPoint.y - previous.y) >= 4)
-        ? [...drawDraftRef.current, finalPoint]
-        : drawDraftRef.current;
-
-    if (points.length < 3) {
+    const start = drawDraftRef.current[0];
+    const end = drawPointFromEvent(event) ?? drawDraftRef.current[1];
+    if (
+      !start ||
+      !end ||
+      Math.abs(end.x - start.x) < 4 ||
+      Math.abs(end.y - start.y) < 4
+    ) {
       updateDrawDraft([]);
-      setDrawError("Trace a larger region before releasing the pointer.");
+      setDrawError(
+        "Drag to draw a larger rectangle before releasing the pointer.",
+      );
       return;
     }
 
-    const coordinates = points.map(({ coordinate }) => coordinate);
-    const first = coordinates[0];
-    const last = coordinates.at(-1);
-    const closedCoordinates =
-      last && last[0] === first[0] && last[1] === first[1]
-        ? coordinates
-        : [...coordinates, first];
+    const west = Math.min(start.coordinate[0], end.coordinate[0]);
+    const south = Math.min(start.coordinate[1], end.coordinate[1]);
+    const east = Math.max(start.coordinate[0], end.coordinate[0]);
+    const north = Math.max(start.coordinate[1], end.coordinate[1]);
+    const closedCoordinates: Array<[number, number]> = [
+      [west, north],
+      [west, south],
+      [east, south],
+      [east, north],
+      [west, north],
+    ];
     const draw = drawRef.current;
     if (!draw) return;
     const feature: GeoJSONStoreFeatures<Polygon> = {
       type: "Feature",
       id: draw.getFeatureId(),
-      properties: { mode: "freehand" },
+      properties: { mode: "rectangle" },
       geometry: {
         type: "Polygon",
         coordinates: [closedCoordinates],
@@ -1350,16 +1345,19 @@ export default function MapWorkspace() {
     if (activeDrawPointerRef.current !== event.pointerId) return;
     activeDrawPointerRef.current = undefined;
     updateDrawDraft([]);
-    setDrawError("Drawing was interrupted. Try tracing the region again.");
+    setDrawError("Drawing was interrupted. Try drawing the rectangle again.");
   };
+  const drawStart = drawDraft[0];
+  const drawEnd = drawDraft[1];
   const drawPreviewPath =
-    drawDraft.length > 1
-      ? `${drawDraft
-          .map(
-            ({ x, y }, index) =>
-              `${index === 0 ? "M" : "L"} ${x} ${y}`,
-          )
-          .join(" ")} Z`
+    drawStart && drawEnd
+      ? [
+          `M ${Math.min(drawStart.x, drawEnd.x)} ${Math.min(drawStart.y, drawEnd.y)}`,
+          `L ${Math.max(drawStart.x, drawEnd.x)} ${Math.min(drawStart.y, drawEnd.y)}`,
+          `L ${Math.max(drawStart.x, drawEnd.x)} ${Math.max(drawStart.y, drawEnd.y)}`,
+          `L ${Math.min(drawStart.x, drawEnd.x)} ${Math.max(drawStart.y, drawEnd.y)}`,
+          "Z",
+        ].join(" ")
       : undefined;
   const resetWorkspace = () => {
     resettingDrawRef.current = true;
@@ -1388,7 +1386,7 @@ export default function MapWorkspace() {
         className="!absolute !inset-0"
         aria-label="Interactive places map"
       />
-      {drawMode === "freehand" ? (
+      {drawMode === "rectangle" ? (
         <div
           data-testid="draw-overlay"
           className="absolute inset-0 z-[5] cursor-crosshair touch-none"
@@ -1441,22 +1439,22 @@ export default function MapWorkspace() {
               <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
                 <button
                   className={`w-full rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-indigo-300 focus:outline-none ${
-                    drawMode === "freehand"
+                    drawMode === "rectangle"
                       ? "bg-indigo-600 text-white shadow-sm"
                       : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                   }`}
                   type="button"
                   disabled={!mapReady}
-                  aria-pressed={drawMode === "freehand"}
+                  aria-pressed={drawMode === "rectangle"}
                   onClick={startDrawing}
                 >
                   Draw area
                 </button>
-                {drawMode === "freehand" ? (
+                {drawMode === "rectangle" ? (
                   <p className="mt-3 text-[11px] leading-4 text-slate-500">
-                    Press and drag on the map to trace an area no more than{" "}
-                    {MAX_AREA_OF_INTEREST_DIMENSION_MILES} miles across. Map
-                    panning is paused.
+                    Press and drag between opposite corners of a rectangle no
+                    more than {MAX_AREA_OF_INTEREST_DIMENSION_MILES} miles
+                    across. Map panning is paused.
                   </p>
                 ) : null}
               </div>
@@ -1466,7 +1464,7 @@ export default function MapWorkspace() {
                   Area defined
                 </p>
                 <p className="mt-3 text-[11px] leading-4 text-slate-500">
-                  Select the area on the map to move it or edit its boundary.
+                  Select the area on the map to move or resize it.
                   Filters and heatmaps are clipped to this area.
                 </p>
               </div>
@@ -1519,14 +1517,9 @@ export default function MapWorkspace() {
                       className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-semibold text-slate-900">
-                            {selection.entry.contribution.name}
-                          </p>
-                          <p className="mt-0.5 truncate text-[11px] text-slate-400">
-                            {selection.entry.extension.name}
-                          </p>
-                        </div>
+                        <p className="min-w-0 truncate text-xs font-semibold text-slate-900">
+                          {selection.entry.contribution.name}
+                        </p>
                         <div className="flex items-center gap-2">
                           <Status
                             runtime={runtime}
@@ -1604,14 +1597,9 @@ export default function MapWorkspace() {
                       className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
                     >
                       <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-xs font-semibold text-slate-900">
-                            {selection.entry.contribution.name}
-                          </p>
-                          <p className="mt-0.5 truncate text-[11px] text-slate-400">
-                            {selection.entry.extension.name}
-                          </p>
-                        </div>
+                        <p className="min-w-0 truncate text-xs font-semibold text-slate-900">
+                          {selection.entry.contribution.name}
+                        </p>
                         <div className="flex items-center gap-2">
                           <Status
                             runtime={runtime}

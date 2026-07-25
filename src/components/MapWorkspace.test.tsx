@@ -184,7 +184,7 @@ vi.mock("terra-draw", () => {
   }
   return {
     TerraDraw: MockDraw,
-    TerraDrawFreehandMode: class {},
+    TerraDrawRectangleMode: class {},
     TerraDrawSelectMode: class {},
   };
 });
@@ -222,21 +222,15 @@ async function drawArea(user: ReturnType<typeof userEvent.setup>) {
     isPrimary: true,
     pointerId: 1,
   });
-  for (const [clientX, clientY] of [
-    [700, 200],
-    [700, 450],
-    [500, 450],
-  ]) {
-    fireEvent.pointerMove(overlay, {
-      clientX,
-      clientY,
-      isPrimary: true,
-      pointerId: 1,
-    });
-  }
+  fireEvent.pointerMove(overlay, {
+    clientX: 700,
+    clientY: 450,
+    isPrimary: true,
+    pointerId: 1,
+  });
   fireEvent.pointerUp(overlay, {
-    clientX: 500,
-    clientY: 200,
+    clientX: 700,
+    clientY: 450,
     isPrimary: true,
     pointerId: 1,
   });
@@ -255,70 +249,75 @@ describe("MapWorkspace", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows the region preview while the pointer is still down", async () => {
-    const user = userEvent.setup();
-    render(<MapWorkspace />);
+  it(
+    "shows a rectangular region preview while the pointer is still down",
+    async () => {
+      const user = userEvent.setup();
+      render(<MapWorkspace />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Draw area" }),
-    );
-    const overlay = screen.getByTestId("draw-overlay");
-    Object.defineProperties(overlay, {
-      getBoundingClientRect: {
-        value: () => ({
-          left: 0,
-          top: 0,
-          right: 1000,
-          bottom: 700,
-          width: 1000,
-          height: 700,
-          x: 0,
-          y: 0,
-          toJSON: () => ({}),
-        }),
-      },
-      setPointerCapture: { value: vi.fn() },
-      releasePointerCapture: { value: vi.fn() },
-    });
+      await user.click(
+        await screen.findByRole("button", { name: "Draw area" }),
+      );
+      const overlay = screen.getByTestId("draw-overlay");
+      Object.defineProperties(overlay, {
+        getBoundingClientRect: {
+          value: () => ({
+            left: 0,
+            top: 0,
+            right: 1000,
+            bottom: 700,
+            width: 1000,
+            height: 700,
+            x: 0,
+            y: 0,
+            toJSON: () => ({}),
+          }),
+        },
+        setPointerCapture: { value: vi.fn() },
+        releasePointerCapture: { value: vi.fn() },
+      });
 
-    fireEvent.pointerDown(overlay, {
-      button: 0,
-      clientX: 500,
-      clientY: 200,
-      isPrimary: true,
-      pointerId: 1,
-    });
-    fireEvent.pointerMove(overlay, {
-      clientX: 700,
-      clientY: 200,
-      isPrimary: true,
-      pointerId: 1,
-    });
-    fireEvent.pointerMove(overlay, {
-      clientX: 700,
-      clientY: 450,
-      isPrimary: true,
-      pointerId: 1,
-    });
+      fireEvent.pointerDown(overlay, {
+        button: 0,
+        clientX: 500,
+        clientY: 200,
+        isPrimary: true,
+        pointerId: 1,
+      });
+      fireEvent.pointerMove(overlay, {
+        clientX: 700,
+        clientY: 200,
+        isPrimary: true,
+        pointerId: 1,
+      });
+      fireEvent.pointerMove(overlay, {
+        clientX: 700,
+        clientY: 450,
+        isPrimary: true,
+        pointerId: 1,
+      });
 
-    expect(screen.getByTestId("draw-preview")).toHaveAttribute(
-      "d",
-      "M 500 200 L 700 200 L 700 450 Z",
-    );
-    expect(screen.getByTestId("draw-preview")).toHaveAttribute("fill", "none");
-    expect(screen.getByTestId("draw-preview")).toHaveAttribute(
-      "stroke",
-      "#64748b",
-    );
-    expect(screen.getByTestId("draw-preview")).toHaveAttribute(
-      "stroke-dasharray",
-      "2 4",
-    );
-    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("0");
-    expect(
-      screen.getByRole("button", { name: "Draw area" }),
-    ).toHaveAttribute("aria-pressed", "true");
-  });
+      expect(screen.getByTestId("draw-preview")).toHaveAttribute(
+        "d",
+        "M 500 200 L 700 200 L 700 450 L 500 450 Z",
+      );
+      expect(screen.getByTestId("draw-preview")).toHaveAttribute("fill", "none");
+      expect(screen.getByTestId("draw-preview")).toHaveAttribute(
+        "stroke",
+        "#64748b",
+      );
+      expect(screen.getByTestId("draw-preview")).toHaveAttribute(
+        "stroke-dasharray",
+        "2 4",
+      );
+      expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent(
+        "0",
+      );
+      expect(
+        screen.getByRole("button", { name: "Draw area" }),
+      ).toHaveAttribute("aria-pressed", "true");
+    },
+  );
 
   it("mutes the map outside the Area of Interest", async () => {
     const user = userEvent.setup();
@@ -381,21 +380,15 @@ describe("MapWorkspace", () => {
       isPrimary: true,
       pointerId: 1,
     });
-    for (const [clientX, clientY] of [
-      [20_500, 200],
-      [20_500, 450],
-      [500, 450],
-    ]) {
-      fireEvent.pointerMove(overlay, {
-        clientX,
-        clientY,
-        isPrimary: true,
-        pointerId: 1,
-      });
-    }
+    fireEvent.pointerMove(overlay, {
+      clientX: 20_500,
+      clientY: 450,
+      isPrimary: true,
+      pointerId: 1,
+    });
     fireEvent.pointerUp(overlay, {
-      clientX: 500,
-      clientY: 200,
+      clientX: 20_500,
+      clientY: 450,
       isPrimary: true,
       pointerId: 1,
     });
@@ -611,6 +604,7 @@ describe("MapWorkspace", () => {
         ),
       { timeout: 5_000 },
     );
+    expect(screen.queryByText("Nearby parks")).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     expect(map.getLayer("filter-owned-regions-fill")).toMatchObject({

@@ -125,8 +125,8 @@ tab. The action is disabled until an Area of Interest exists.
 
 - A single **Area of Interest** is mandatory before Actions, Filters, and
   Heatmaps become available.
-- Select **Draw area**, then press and drag on the map to trace a freehand
-  polygon. Its bounding box cannot be more than 50 miles across in either
+- Select **Draw area**, then press and drag between opposite corners of a
+  rectangle. It cannot be more than 50 miles across in either
   dimension.
 - The completed area remains selectable and editable on the map. **RESET**
   removes it along with every configured filter and heatmap after confirmation.

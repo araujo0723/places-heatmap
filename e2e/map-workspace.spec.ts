@@ -24,18 +24,17 @@ async function drawArea(page: Page) {
   const box = await overlay.boundingBox();
   expect(box).not.toBeNull();
   if (!box) throw new Error("Drawing overlay was not visible.");
-  const path = [
-    [box.x + box.width * 0.45, box.y + box.height * 0.4],
-    [box.x + box.width * 0.65, box.y + box.height * 0.4],
-    [box.x + box.width * 0.65, box.y + box.height * 0.6],
-    [box.x + box.width * 0.45, box.y + box.height * 0.6],
-    [box.x + box.width * 0.45, box.y + box.height * 0.4],
+  const start = [
+    box.x + box.width * 0.45,
+    box.y + box.height * 0.4,
   ] as const;
-  await page.mouse.move(path[0][0], path[0][1]);
+  const end = [
+    box.x + box.width * 0.65,
+    box.y + box.height * 0.6,
+  ] as const;
+  await page.mouse.move(start[0], start[1]);
   await page.mouse.down();
-  for (const [x, y] of path.slice(1)) {
-    await page.mouse.move(x, y, { steps: 12 });
-  }
+  await page.mouse.move(end[0], end[1], { steps: 12 });
   await page.mouse.up();
   await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
   return box;
@@ -253,23 +252,19 @@ test("draws one Area of Interest and resets the workspace with confirmation", as
   expect(box).not.toBeNull();
   if (!box) return;
 
-  const path = [
-    [box.x + box.width * 0.45, box.y + box.height * 0.4],
-    [box.x + box.width * 0.65, box.y + box.height * 0.4],
-    [box.x + box.width * 0.65, box.y + box.height * 0.6],
-    [box.x + box.width * 0.45, box.y + box.height * 0.6],
-    [box.x + box.width * 0.45, box.y + box.height * 0.4],
+  const start = [
+    box.x + box.width * 0.45,
+    box.y + box.height * 0.4,
   ] as const;
-  await page.mouse.move(path[0][0], path[0][1]);
+  const end = [
+    box.x + box.width * 0.65,
+    box.y + box.height * 0.6,
+  ] as const;
+  await page.mouse.move(start[0], start[1]);
   await page.mouse.down();
-  for (const [x, y] of path.slice(1, 3)) {
-    await page.mouse.move(x, y, { steps: 12 });
-  }
+  await page.mouse.move(end[0], end[1], { steps: 12 });
   await expect(page.getByTestId("draw-preview")).toBeVisible();
   await expect(page.getByTestId("area-of-interest-count")).toHaveText("0");
-  for (const [x, y] of path.slice(3)) {
-    await page.mouse.move(x, y, { steps: 12 });
-  }
   await page.mouse.up();
 
   await expect(page.getByTestId("draw-preview")).toHaveCount(0);
