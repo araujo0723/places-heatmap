@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("starts with only the nearby-parks contributions", async ({ page }) => {
+test("starts with the Zillow action and nearby-parks data contributions", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByTestId("location-status")).toHaveText(
@@ -25,6 +25,8 @@ test("starts with only the nearby-parks contributions", async ({ page }) => {
   await expect(page.getByText("© OpenStreetMap contributors")).toBeVisible();
   await expect(page.getByText("No active filters")).toBeVisible();
   await expect(page.getByText("No active heatmaps")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Actions" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "GO TO ZILLOW" })).toBeDisabled();
   await expect(page.getByText("Places workspace")).toHaveCount(0);
   await expect(page.getByText("Explore the map")).toHaveCount(0);
   await expect(page.getByLabel("Filter").locator("option")).toHaveCount(2);

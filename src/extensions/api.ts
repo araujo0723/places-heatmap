@@ -49,6 +49,18 @@ export interface ControlProps<State> {
   loading: boolean;
 }
 
+export interface ActionControlProps {
+  disabled: boolean;
+  regions: FeatureCollection<RegionGeometry>;
+  viewport: MapViewport;
+}
+
+export interface ActionContribution {
+  id: string;
+  name: string;
+  Controls: ComponentType<ActionControlProps>;
+}
+
 export interface FilterContribution<State = unknown> {
   id: string;
   name: string;
@@ -116,6 +128,7 @@ export interface MapExtension {
   id: string;
   name: string;
   description?: string;
+  actions?: ReadonlyArray<ActionContribution>;
   filters?: ReadonlyArray<FilterContribution<any>>;
   heatmaps?: ReadonlyArray<HeatmapContribution<any>>;
 }

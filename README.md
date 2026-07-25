@@ -93,21 +93,33 @@ export default defineExtension({
   apiVersion: 1,
   id: "my-extension",
   name: "My extension",
+  actions: [],
   filters: [],
   heatmaps: [],
 });
 ```
 
-Filter contributions provide a settings component and can resolve a pure point
-predicate, filter-owned regions, or both. Heatmap contributions load either
-GeoJSON points or weighted polygon surfaces and provide declarative styling.
-Both receive the current viewport and a stable per-instance random seed. See
-`src/extensions/nearby-parks/index.tsx` for a working region filter and surface
-heatmap.
+Action contributions provide always-present custom controls and receive the
+current viewport plus the host-composed region boundary. The **Actions** region
+is omitted when no extension contributes a control. Filter contributions
+provide a settings component and can resolve a pure point predicate,
+filter-owned regions, or both. Heatmap contributions load either GeoJSON points
+or weighted polygon surfaces and provide declarative styling. Filters and
+heatmaps receive the current viewport and a stable per-instance random seed.
+See `src/extensions/nearby-parks/index.tsx` for a working region filter and
+surface heatmap.
 
 Extensions never receive the MapLibre instance. The host validates data,
 composes all active predicates with the drawn-region constraint, and owns map
 source/layer lifecycle.
+
+## Zillow
+
+The bundled Zillow extension adds **GO TO ZILLOW** to **Actions**. It unions
+regions from each source, intersects those source boundaries, keeps the largest
+components, and simplifies the result to a conservative Zillow vertex budget.
+After Zillow accepts the custom boundary, its rentals search opens in a new
+tab. The action is disabled until a drawn or filter-owned region exists.
 
 ## Filter behavior
 

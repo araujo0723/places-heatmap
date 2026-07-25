@@ -243,10 +243,15 @@ describe("MapWorkspace", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("exposes only the nearby-parks contributions", async () => {
+  it("exposes the Zillow action and nearby-parks data contributions", async () => {
     render(<MapWorkspace />);
 
     expect(await screen.findByText("Centered near you")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "GO TO ZILLOW" }),
+    ).toBeDisabled();
+    expect(screen.getByText("Draw or activate a region boundary first."))
+      .toBeInTheDocument();
     expect(screen.getByText("No active filters")).toBeInTheDocument();
     expect(screen.getByText("No active heatmaps")).toBeInTheDocument();
     expect(screen.getByLabelText("Filter")).toHaveTextContent(
@@ -256,6 +261,91 @@ describe("MapWorkspace", () => {
       "Nearby parks · Park influence",
     );
     expect(screen.queryByText(/demo-places/i)).not.toBeInTheDocument();
+  });
+
+  it("creates the drawn boundary in Zillow before opening a new tab", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        Response.json({ customRegionId: "saved-region" }),
+    );
+    const openMock = vi
+      .spyOn(window, "open")
+      .mockImplementation(() => null);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Draw region" }),
+    );
+    const overlay = screen.getByTestId("draw-overlay");
+    Object.defineProperties(overlay, {
+      getBoundingClientRect: {
+        value: () => ({
+          left: 0,
+          top: 0,
+          right: 1000,
+          bottom: 700,
+          width: 1000,
+          height: 700,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }),
+      },
+      setPointerCapture: { value: vi.fn() },
+      releasePointerCapture: { value: vi.fn() },
+    });
+    fireEvent.pointerDown(overlay, {
+      button: 0,
+      clientX: 500,
+      clientY: 200,
+      isPrimary: true,
+      pointerId: 1,
+    });
+    for (const [clientX, clientY] of [
+      [700, 200],
+      [700, 450],
+      [500, 450],
+    ]) {
+      fireEvent.pointerMove(overlay, {
+        clientX,
+        clientY,
+        isPrimary: true,
+        pointerId: 1,
+      });
+    }
+    fireEvent.pointerUp(overlay, {
+      clientX: 500,
+      clientY: 200,
+      isPrimary: true,
+      pointerId: 1,
+    });
+
+    const zillowButton = screen.getByRole("button", {
+      name: "GO TO ZILLOW",
+    });
+    await waitFor(() => expect(zillowButton).toBeEnabled());
+    await user.click(zillowButton);
+    await waitFor(() => expect(openMock).toHaveBeenCalledTimes(1));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/zillow/custom-region",
+      expect.objectContaining({ method: "POST" }),
+    );
+    const request = fetchMock.mock.calls[0][1] as RequestInit;
+    const payload = JSON.parse(String(request.body)) as {
+      polygons: Array<Array<[number, number]>>;
+    };
+    expect(payload.polygons).toHaveLength(1);
+    expect(payload.polygons[0][0]).toEqual(payload.polygons[0].at(-1));
+    expect(openMock.mock.calls[0][0]).toContain(
+      "https://www.zillow.com/homes/for_rent/",
+    );
+    expect(openMock.mock.calls[0].slice(1)).toEqual([
+      "_blank",
+      "noopener,noreferrer",
+    ]);
   });
 
   it("renders park layers immediately while the base style is busy, then refreshes after movement", async () => {

@@ -28,7 +28,10 @@ import {
   normalizeHeatmapFeatures,
   normalizeSurfaceHeatmap,
 } from "../core/composition";
-import { clipSurfaceCollection } from "../core/regions";
+import {
+  clipSurfaceCollection,
+  intersectRegionGroups,
+} from "../core/regions";
 import type {
   HostedPoint,
   MapViewport,
@@ -253,7 +256,10 @@ function SectionHeading({
   return (
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
-        <h2 className="text-xs font-bold tracking-[0.16em] text-slate-500 uppercase">
+        <h2
+          id={`${title.toLowerCase()}-heading`}
+          className="text-xs font-bold tracking-[0.16em] text-slate-500 uppercase"
+        >
           {title}
         </h2>
         <span
@@ -764,6 +770,31 @@ export default function MapWorkspace() {
     () => [...regions, ...ownedRegions],
     [ownedRegions, regions],
   );
+  const actionRegions = useMemo<FeatureCollection<RegionGeometry>>(() => {
+    const boundary = intersectRegionGroups([
+      regions,
+      ...activeFilters.map(
+        ({ instanceId }) => filterRuntime[instanceId]?.regions ?? [],
+      ),
+    ]);
+    return {
+      type: "FeatureCollection",
+      features: boundary ? [boundary] : [],
+    };
+  }, [activeFilters, filterRuntime, regions]);
+  const actionViewport = currentViewport();
+  const actionsDisabled =
+    !mapReady ||
+    activeFilters.some(
+      ({ instanceId, entry }) => {
+        const runtime = filterRuntime[instanceId];
+        return (
+          !!entry.contribution.resolveRegions &&
+          (runtime?.status === "loading" ||
+            (!runtime?.regions && runtime?.status !== "ready"))
+        );
+      },
+    );
 
   const filtersBlocked = activeFilters.some(
     ({ instanceId }) => !filterRuntime[instanceId]?.predicate,
@@ -1278,6 +1309,28 @@ export default function MapWorkspace() {
               ) : null}
             </div>
           </section>
+
+          {extensionRegistry.actions.length > 0 ? (
+            <section className="space-y-3" aria-labelledby="actions-heading">
+              <SectionHeading
+                title="Actions"
+                count={extensionRegistry.actions.length}
+              />
+              <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                {extensionRegistry.actions.map((entry) => {
+                  const Controls = entry.contribution.Controls;
+                  return (
+                    <Controls
+                      key={entry.key}
+                      disabled={actionsDisabled}
+                      regions={actionRegions}
+                      viewport={actionViewport}
+                    />
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
 
           <section className="space-y-3" aria-labelledby="filters-heading">
             <SectionHeading title="Filters" count={activeFilters.length} />

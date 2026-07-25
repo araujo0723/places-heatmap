@@ -1,4 +1,5 @@
 import type {
+  ActionContribution,
   FilterContribution,
   HeatmapContribution,
   MapExtension,
@@ -11,6 +12,12 @@ export interface RegisteredFilter {
   contribution: FilterContribution<any>;
 }
 
+export interface RegisteredAction {
+  key: string;
+  extension: MapExtension;
+  contribution: ActionContribution;
+}
+
 export interface RegisteredHeatmap {
   key: string;
   extension: MapExtension;
@@ -19,6 +26,7 @@ export interface RegisteredHeatmap {
 
 export interface ExtensionRegistry {
   extensions: MapExtension[];
+  actions: RegisteredAction[];
   filters: RegisteredFilter[];
   heatmaps: RegisteredHeatmap[];
   diagnostics: string[];
@@ -34,12 +42,19 @@ function hasText(value: unknown): value is string {
 
 function validateContribution(
   contribution: unknown,
-  kind: "filter" | "heatmap",
-): contribution is FilterContribution<any> | HeatmapContribution<any> {
+  kind: "action" | "filter" | "heatmap",
+): contribution is
+  | ActionContribution
+  | FilterContribution<any>
+  | HeatmapContribution<any> {
   if (!contribution || typeof contribution !== "object") return false;
 
   const candidate = contribution as Record<string, unknown>;
   if (!hasText(candidate.id) || !hasText(candidate.name)) return false;
+
+  if (kind === "action") {
+    return typeof candidate.Controls === "function";
+  }
 
   if (kind === "filter") {
     return (
@@ -67,6 +82,7 @@ function validateExtension(value: unknown): value is MapExtension {
     candidate.apiVersion === 1 &&
     hasText(candidate.id) &&
     hasText(candidate.name) &&
+    (candidate.actions === undefined || Array.isArray(candidate.actions)) &&
     (candidate.filters === undefined || Array.isArray(candidate.filters)) &&
     (candidate.heatmaps === undefined || Array.isArray(candidate.heatmaps))
   );
@@ -77,6 +93,7 @@ export function createExtensionRegistry(
 ): ExtensionRegistry {
   const registry: ExtensionRegistry = {
     extensions: [],
+    actions: [],
     filters: [],
     heatmaps: [],
     diagnostics: [],
@@ -107,6 +124,26 @@ export function createExtensionRegistry(
 
     const contributionIds = new Set<string>();
     let valid = true;
+
+    for (const contribution of candidate.actions ?? []) {
+      if (!validateContribution(contribution, "action")) {
+        registry.diagnostics.push(
+          `${path}: extension "${candidate.id}" has an invalid action contribution.`,
+        );
+        valid = false;
+        break;
+      }
+      if (contributionIds.has(contribution.id)) {
+        registry.diagnostics.push(
+          `${path}: extension "${candidate.id}" repeats contribution id "${contribution.id}".`,
+        );
+        valid = false;
+        break;
+      }
+      contributionIds.add(contribution.id);
+    }
+
+    if (!valid) continue;
 
     for (const contribution of candidate.filters ?? []) {
       if (!validateContribution(contribution, "filter")) {
@@ -150,6 +187,13 @@ export function createExtensionRegistry(
 
     extensionIds.add(candidate.id);
     registry.extensions.push(candidate);
+    registry.actions.push(
+      ...(candidate.actions ?? []).map((contribution) => ({
+        key: contributionKey(candidate.id, contribution.id),
+        extension: candidate,
+        contribution,
+      })),
+    );
     registry.filters.push(
       ...(candidate.filters ?? []).map((contribution) => ({
         key: contributionKey(candidate.id, contribution.id),

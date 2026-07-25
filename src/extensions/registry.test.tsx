@@ -9,6 +9,13 @@ function validExtension(id: string) {
     apiVersion: 1,
     id,
     name: `Extension ${id}`,
+    actions: [
+      {
+        id: "action",
+        name: "Action",
+        Controls,
+      },
+    ],
     filters: [
       {
         id: "filter",
@@ -31,12 +38,13 @@ function validExtension(id: string) {
 }
 
 describe("extension registry", () => {
-  it("registers valid filter and heatmap contributions", () => {
+  it("registers valid action, filter, and heatmap contributions", () => {
     const registry = createExtensionRegistry({
       "./alpha/index.tsx": { default: validExtension("alpha") },
     });
 
     expect(registry.extensions).toHaveLength(1);
+    expect(registry.actions[0].key).toBe("alpha/action");
     expect(registry.filters[0].key).toBe("alpha/filter");
     expect(registry.heatmaps[0].key).toBe("alpha/heatmap");
     expect(registry.diagnostics).toEqual([]);
@@ -60,9 +68,9 @@ describe("extension registry", () => {
     );
   });
 
-  it("rejects contribution IDs repeated across filter and heatmap lists", () => {
+  it("rejects contribution IDs repeated across contribution lists", () => {
     const candidate = validExtension("repeated");
-    candidate.heatmaps[0].id = "filter";
+    candidate.heatmaps[0].id = "action";
     const registry = createExtensionRegistry({
       "./repeated/index.tsx": { default: candidate },
     });

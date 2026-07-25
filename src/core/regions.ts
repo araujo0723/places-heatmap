@@ -28,6 +28,25 @@ export function unionRegions(
   return union(featureCollection([...regions])) as RegionFeature | undefined;
 }
 
+export function intersectRegionGroups(
+  groups: ReadonlyArray<ReadonlyArray<RegionFeature>>,
+): RegionFeature | undefined {
+  const masks = groups
+    .filter((regions) => regions.length > 0)
+    .map((regions) => unionRegions(regions))
+    .filter((region): region is RegionFeature => !!region);
+
+  if (masks.length === 0) return undefined;
+
+  return masks.slice(1).reduce<RegionFeature | undefined>((result, mask) => {
+    if (!result) return undefined;
+    return (
+      (intersect(featureCollection([result, mask])) as RegionFeature | null) ??
+      undefined
+    );
+  }, masks[0]);
+}
+
 export function clipSurfaceCollection(
   collection: FeatureCollection<RegionGeometry, SurfaceProperties>,
   regions: ReadonlyArray<RegionFeature>,
@@ -53,4 +72,3 @@ export function clipSurfaceCollection(
     }),
   };
 }
-
