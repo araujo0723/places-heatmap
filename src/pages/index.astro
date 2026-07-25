@@ -1,0 +1,27 @@
+---
+import MapWorkspace from "../components/MapWorkspace";
+import "../styles/global.css";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width" />
+    <meta
+      name="description"
+      content="An extensible workspace for filtering places and exploring heatmaps."
+    />
+    <title>Places Heatmap</title>
+  </head>
+  <body class="bg-slate-950">
+    <MapWorkspace client:only="react">
+      <div
+        slot="fallback"
+        class="grid h-screen place-items-center text-sm font-medium text-slate-400"
+      >
+        Loading map workspace…
+      </div>
+    </MapWorkspace>
+  </body>
+</html>
