@@ -59,7 +59,7 @@ function ZillowControls({ disabled, regions }: ActionControlProps) {
       </button>
       {!bounds ? (
         <p className="mt-2 text-[11px] leading-4 text-slate-500">
-          Draw or activate a region boundary first.
+          Define an Area of Interest first.
         </p>
       ) : null}
       {error ? (

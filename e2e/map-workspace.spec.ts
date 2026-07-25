@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const mapTilePng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAQAAAAEAAQMAAABmvDolAAAABGdBTUEAALGPC/xhBQAAACBjSFJNAAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAABlBMVEXi6PD///9gl7/tAAAAAWJLR0QB/wIt3gAAAAd0SU1FB+oHGREgKS7oI8gAAAAfSURBVGje7cEBDQAAAMKg909tDjegAAAAAAAAAAC+DSEAAAF/GZynAAAAJXRFWHRkYXRlOmNyZWF0ZQAyMDI2LTA3LTI1VDE3OjMyOjQxKzAwOjAwxWCutAAAACV0RVh0ZGF0ZTptb2RpZnkAMjAyNi0wNy0yNVQxNzozMjo0MSswMDowMLQ9FggAAAAASUVORK5CYII=",
@@ -14,6 +14,32 @@ test.beforeEach(async ({ page }) => {
     }),
   );
 });
+
+async function drawArea(page: Page) {
+  const drawButton = page.getByRole("button", { name: "Draw area" });
+  await expect(drawButton).toBeEnabled({ timeout: 15_000 });
+  await drawButton.click();
+
+  const overlay = page.getByTestId("draw-overlay");
+  const box = await overlay.boundingBox();
+  expect(box).not.toBeNull();
+  if (!box) throw new Error("Drawing overlay was not visible.");
+  const path = [
+    [box.x + box.width * 0.45, box.y + box.height * 0.4],
+    [box.x + box.width * 0.65, box.y + box.height * 0.4],
+    [box.x + box.width * 0.65, box.y + box.height * 0.6],
+    [box.x + box.width * 0.45, box.y + box.height * 0.6],
+    [box.x + box.width * 0.45, box.y + box.height * 0.4],
+  ] as const;
+  await page.mouse.move(path[0][0], path[0][1]);
+  await page.mouse.down();
+  for (const [x, y] of path.slice(1)) {
+    await page.mouse.move(x, y, { steps: 12 });
+  }
+  await page.mouse.up();
+  await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
+  return box;
+}
 
 test("starts with the bundled data contributions", async ({ page }) => {
   await page.goto("/");
@@ -31,6 +57,12 @@ test("starts with the bundled data contributions", async ({ page }) => {
   await expect(page.getByText("Explore the map")).toHaveCount(0);
   const filterSelector = page.getByLabel("Filter", { exact: true });
   const heatmapSelector = page.getByLabel("Heatmap", { exact: true });
+  await expect(page.getByRole("heading", { name: "Area of interest" }))
+    .toBeVisible();
+  await expect(page.getByRole("button", { name: "Draw area" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "RESET" })).toBeDisabled();
+  await expect(filterSelector).toBeDisabled();
+  await expect(heatmapSelector).toBeDisabled();
   await expect(filterSelector.locator("option")).toHaveCount(3);
   await expect(heatmapSelector.locator("option")).toHaveCount(3);
   await expect(
@@ -87,16 +119,14 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
     });
   });
   await page.goto("/");
+  await drawArea(page);
 
   await page
     .getByLabel("Filter", { exact: true })
     .selectOption("nearby-parks/distance");
-  await expect(page.getByTestId("region-count")).toHaveText("2");
-  await expect(page.getByText(/2 filter-owned regions/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Clear all" })).toBeDisabled();
+  await expect(page.getByText("Active", { exact: true })).toBeVisible();
 
   await page.getByRole("slider", { name: "Park distance" }).fill("0");
-  await expect(page.getByTestId("region-count")).toHaveText("1");
 
   await page
     .getByLabel("Heatmap", { exact: true })
@@ -120,10 +150,10 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
       await page.waitForTimeout(600);
     }
   }
-  await expect.poll(() => parkRequests).toBeGreaterThan(1);
+  expect(parkRequests).toBe(1);
 
   await page.getByRole("button", { name: "Remove Park distance" }).click();
-  await expect(page.getByTestId("region-count")).toHaveText("0");
+  await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
   await page.getByRole("button", { name: "Remove Park influence" }).click();
 });
 
@@ -136,6 +166,7 @@ test("allows duplicate heatmap instances", async ({ page }) => {
     }),
   );
   await page.goto("/");
+  await drawArea(page);
 
   const heatmapSelector = page.getByLabel("Heatmap", { exact: true });
   await heatmapSelector.selectOption("nearby-parks/influence");
@@ -153,15 +184,13 @@ test("allows duplicate heatmap instances", async ({ page }) => {
   await expect(removeButtons).toHaveCount(1);
 });
 
-test("draws and clears a polygon region", async ({ page }) => {
+test("draws one Area of Interest and resets the workspace with confirmation", async ({ page }) => {
   await page.goto("/");
 
-  const drawButton = page.getByRole("button", { name: "Draw region" });
-  const selectButton = page.getByRole("button", { name: "Select & edit" });
+  const drawButton = page.getByRole("button", { name: "Draw area" });
   await expect(drawButton).toBeEnabled({ timeout: 15_000 });
   await drawButton.click();
   await expect(drawButton).toHaveAttribute("aria-pressed", "true");
-  await expect(selectButton).toHaveAttribute("aria-pressed", "false");
 
   const overlay = page.getByTestId("draw-overlay");
   await expect(overlay).toHaveCSS("cursor", "crosshair");
@@ -170,11 +199,11 @@ test("draws and clears a polygon region", async ({ page }) => {
   if (!box) return;
 
   const path = [
-    [box.x + box.width * 0.55, box.y + box.height * 0.3],
-    [box.x + box.width * 0.8, box.y + box.height * 0.3],
-    [box.x + box.width * 0.8, box.y + box.height * 0.7],
-    [box.x + box.width * 0.55, box.y + box.height * 0.7],
-    [box.x + box.width * 0.55, box.y + box.height * 0.3],
+    [box.x + box.width * 0.45, box.y + box.height * 0.4],
+    [box.x + box.width * 0.65, box.y + box.height * 0.4],
+    [box.x + box.width * 0.65, box.y + box.height * 0.6],
+    [box.x + box.width * 0.45, box.y + box.height * 0.6],
+    [box.x + box.width * 0.45, box.y + box.height * 0.4],
   ] as const;
   await page.mouse.move(path[0][0], path[0][1]);
   await page.mouse.down();
@@ -182,15 +211,16 @@ test("draws and clears a polygon region", async ({ page }) => {
     await page.mouse.move(x, y, { steps: 12 });
   }
   await expect(page.getByTestId("draw-preview")).toBeVisible();
-  await expect(page.getByTestId("region-count")).toHaveText("0");
+  await expect(page.getByTestId("area-of-interest-count")).toHaveText("0");
   for (const [x, y] of path.slice(3)) {
     await page.mouse.move(x, y, { steps: 12 });
   }
   await page.mouse.up();
 
   await expect(page.getByTestId("draw-preview")).toHaveCount(0);
-  await expect(page.getByTestId("region-count")).toHaveText("1");
-  await expect(selectButton).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
+  await expect(drawButton).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "RESET" })).toBeEnabled();
   await page.addStyleTag({
     content:
       ".maplibregl-user-location-dot,.maplibregl-user-location-accuracy-circle{display:none!important}",
@@ -198,13 +228,18 @@ test("draws and clears a polygon region", async ({ page }) => {
   await expect(page).toHaveScreenshot("persisted-region.png", {
     animations: "disabled",
     clip: {
-      x: box.x + box.width * 0.5,
-      y: box.y + box.height * 0.25,
-      width: box.width * 0.35,
-      height: box.height * 0.5,
+      x: box.x + box.width * 0.4,
+      y: box.y + box.height * 0.35,
+      width: box.width * 0.3,
+      height: box.height * 0.3,
     },
     maxDiffPixelRatio: 0.01,
   });
-  await page.getByRole("button", { name: "Clear all" }).click();
-  await expect(page.getByTestId("region-count")).toHaveText("0");
+  await page.getByRole("button", { name: "RESET" }).click();
+  await expect(
+    page.getByRole("dialog", { name: "Reset the workspace?" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Reset everything" }).click();
+  await expect(page.getByTestId("area-of-interest-count")).toHaveText("0");
+  await expect(page.getByRole("button", { name: "Draw area" })).toBeEnabled();
 });

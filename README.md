@@ -100,18 +100,18 @@ export default defineExtension({
 ```
 
 Action contributions provide always-present custom controls and receive the
-current viewport plus the host-composed region boundary. The **Actions** region
-is omitted when no extension contributes a control. Filter contributions
+Area of Interest viewport plus the host-composed region boundary. The
+**Actions** section is omitted when no extension contributes a control. Filter contributions
 provide a settings component and can resolve a pure point predicate,
 filter-owned regions, or both. Heatmap contributions load either GeoJSON points
 or weighted polygon surfaces and provide declarative styling. Filters and
-heatmaps receive the current viewport and a stable per-instance random seed.
+heatmaps receive the Area of Interest viewport and a stable per-instance random seed.
 See `src/extensions/nearby-parks/index.tsx` for a working region filter and
 surface heatmap.
 
 Extensions never receive the MapLibre instance. The host validates data,
-composes all active predicates with the drawn-region constraint, and owns map
-source/layer lifecycle.
+composes all active predicates with the Area of Interest constraint, clips
+filter and heatmap geometry to that area, and owns map source/layer lifecycle.
 
 ## Zillow
 
@@ -119,27 +119,30 @@ The bundled Zillow extension adds **GO TO ZILLOW** to **Actions**. It unions
 regions from each source, intersects those source boundaries, keeps the largest
 components, and simplifies the result to a conservative Zillow vertex budget.
 After Zillow accepts the custom boundary, its rentals search opens in a new
-tab. The action is disabled until a drawn or filter-owned region exists.
+tab. The action is disabled until an Area of Interest exists.
 
 ## Filter behavior
 
+- A single **Area of Interest** is mandatory before Actions, Filters, and
+  Heatmaps become available.
+- Select **Draw area**, then press and drag on the map to trace a freehand
+  polygon. Its bounding box cannot be more than 50 miles across in either
+  dimension.
+- The completed area remains selectable and editable on the map. **RESET**
+  removes it along with every configured filter and heatmap after confirmation.
 - Active extension filters combine with AND semantics.
 - Region-producing filters add host-rendered, non-editable regions. Their
-  controls replace those regions, and removing the filter removes them.
-- Multiple drawn polygons combine as a union.
-- Drawn and filter-owned regions form a union which is ANDed with point
-  predicates.
-- Select **Draw region**, then press and drag on the map to trace a freehand
-  polygon. Map panning is suspended until the polygon is finished.
-- With no regions, the region constraint is neutral.
-- **Clear all** and **Delete selected** affect manually drawn regions only.
+  controls replace those regions, removing the filter removes them, and their
+  visible geometry is clipped to the Area of Interest.
+- Filter regions intersect with the Area of Interest and all point predicates.
+- Every point and surface heatmap is clipped to the resulting boundary.
 - Settings and regions are intentionally session-only in this increment.
 
 ## Nearby parks
 
 The bundled Nearby parks extension queries OpenStreetMap `leisure=park` objects
-for the visible map plus 5 km. It refreshes after settled map movement and
-shares six-hour, zoom-11 tile caches between its filter and heatmap.
+for the Area of Interest plus 5 km and shares six-hour, zoom-11 tile caches
+between its filter and heatmap.
 
 - **Park distance** creates a bbox-expanded or circular filter region for every
   park, from 0 to 2,000 m.

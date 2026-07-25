@@ -47,7 +47,10 @@ vi.mock("maplibre-gl", () => {
       return this.canvas;
     }
     unproject([x, y]: [number, number]) {
-      return { lng: x / 100, lat: y / 100 };
+      return {
+        lng: this.center.lng + (x - 500) / 10_000,
+        lat: this.center.lat + (350 - y) / 10_000,
+      };
     }
     getCenter() {
       return this.center;
@@ -84,6 +87,18 @@ vi.mock("maplibre-gl", () => {
     }
     addLayer(layer: { id: string }) {
       this.layers.set(layer.id, layer);
+    }
+    setPaintProperty(id: string, property: string, value: unknown) {
+      const layer = this.layers.get(id) as
+        | { paint?: Record<string, unknown> }
+        | undefined;
+      if (layer) layer.paint = { ...layer.paint, [property]: value };
+    }
+    setLayoutProperty(id: string, property: string, value: unknown) {
+      const layer = this.layers.get(id) as
+        | { layout?: Record<string, unknown> }
+        | undefined;
+      if (layer) layer.layout = { ...layer.layout, [property]: value };
     }
     getLayer(id: string) {
       return this.layers.get(id);
@@ -178,6 +193,58 @@ import MapWorkspace from "./MapWorkspace";
 import { Map as MapLibreMap } from "maplibre-gl";
 import { clearNearbyParkCache } from "../extensions/nearby-parks/data";
 
+async function drawArea(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole("button", { name: "Draw area" }),
+  );
+  const overlay = screen.getByTestId("draw-overlay");
+  Object.defineProperties(overlay, {
+    getBoundingClientRect: {
+      value: () => ({
+        left: 0,
+        top: 0,
+        right: 1000,
+        bottom: 700,
+        width: 1000,
+        height: 700,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      }),
+    },
+    setPointerCapture: { value: vi.fn() },
+    releasePointerCapture: { value: vi.fn() },
+  });
+  fireEvent.pointerDown(overlay, {
+    button: 0,
+    clientX: 500,
+    clientY: 200,
+    isPrimary: true,
+    pointerId: 1,
+  });
+  for (const [clientX, clientY] of [
+    [700, 200],
+    [700, 450],
+    [500, 450],
+  ]) {
+    fireEvent.pointerMove(overlay, {
+      clientX,
+      clientY,
+      isPrimary: true,
+      pointerId: 1,
+    });
+  }
+  fireEvent.pointerUp(overlay, {
+    clientX: 500,
+    clientY: 200,
+    isPrimary: true,
+    pointerId: 1,
+  });
+  await waitFor(() =>
+    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1"),
+  );
+}
+
 describe("MapWorkspace", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -193,7 +260,7 @@ describe("MapWorkspace", () => {
     render(<MapWorkspace />);
 
     await user.click(
-      await screen.findByRole("button", { name: "Draw region" }),
+      await screen.findByRole("button", { name: "Draw area" }),
     );
     const overlay = screen.getByTestId("draw-overlay");
     Object.defineProperties(overlay, {
@@ -238,52 +305,56 @@ describe("MapWorkspace", () => {
       "d",
       "M 500 200 L 700 200 L 700 450 Z",
     );
-    expect(screen.getByTestId("region-count")).toHaveTextContent("0");
+    expect(screen.getByTestId("draw-preview")).toHaveAttribute("fill", "none");
+    expect(screen.getByTestId("draw-preview")).toHaveAttribute(
+      "stroke",
+      "#64748b",
+    );
+    expect(screen.getByTestId("draw-preview")).toHaveAttribute(
+      "stroke-dasharray",
+      "2 4",
+    );
+    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("0");
     expect(
-      screen.getByRole("button", { name: "Draw region" }),
+      screen.getByRole("button", { name: "Draw area" }),
     ).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("exposes the Zillow action and nearby-parks data contributions", async () => {
+  it("mutes the map outside the Area of Interest", async () => {
+    const user = userEvent.setup();
     render(<MapWorkspace />);
 
-    expect(await screen.findByText("Centered near you")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "GO TO ZILLOW" }),
-    ).toBeDisabled();
-    expect(screen.getByText("Draw or activate a region boundary first."))
-      .toBeInTheDocument();
-    expect(screen.getByText("No active filters")).toBeInTheDocument();
-    expect(screen.getByText("No active heatmaps")).toBeInTheDocument();
-    expect(screen.getByLabelText("Filter")).toHaveTextContent(
-      "Nearby parks · Park distance",
-    );
-    expect(screen.getByLabelText("Filter")).toHaveTextContent(
-      "Commute time · Commute time",
-    );
-    expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
-      "Nearby parks · Park influence",
-    );
-    expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
-      "Commute time · Commute time",
-    );
-    expect(screen.queryByText(/demo-places/i)).not.toBeInTheDocument();
+    await drawArea(user);
+
+    const map = (
+      MapLibreMap as unknown as {
+        lastInstance: {
+          getLayer(id: string): unknown;
+          getSource(id: string): { data: FeatureCollection } | undefined;
+        };
+      }
+    ).lastInstance;
+    expect(map.getLayer("area-of-interest-outside-mask")).toMatchObject({
+      type: "fill",
+      paint: {
+        "fill-color": "#64748b",
+        "fill-opacity": 0.48,
+      },
+    });
+    const mask = map.getSource("area-of-interest-mask-source")?.data;
+    expect(mask?.features).toHaveLength(1);
+    expect(mask?.features[0].geometry.type).toBe("Polygon");
+    if (mask?.features[0].geometry.type === "Polygon") {
+      expect(mask.features[0].geometry.coordinates).toHaveLength(2);
+    }
   });
 
-  it("creates the drawn boundary in Zillow before opening a new tab", async () => {
-    const fetchMock = vi.fn(
-      async (_input: RequestInfo | URL, _init?: RequestInit) =>
-        Response.json({ customRegionId: "saved-region" }),
-    );
-    const openMock = vi
-      .spyOn(window, "open")
-      .mockImplementation(() => null);
-    vi.stubGlobal("fetch", fetchMock);
+  it("rejects an Area of Interest over 50 miles across", async () => {
     const user = userEvent.setup();
     render(<MapWorkspace />);
 
     await user.click(
-      await screen.findByRole("button", { name: "Draw region" }),
+      await screen.findByRole("button", { name: "Draw area" }),
     );
     const overlay = screen.getByTestId("draw-overlay");
     Object.defineProperties(overlay, {
@@ -311,8 +382,8 @@ describe("MapWorkspace", () => {
       pointerId: 1,
     });
     for (const [clientX, clientY] of [
-      [700, 200],
-      [700, 450],
+      [20_500, 200],
+      [20_500, 450],
       [500, 450],
     ]) {
       fireEvent.pointerMove(overlay, {
@@ -328,6 +399,101 @@ describe("MapWorkspace", () => {
       isPrimary: true,
       pointerId: 1,
     });
+
+    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("0");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "It cannot be more than 50 miles.",
+    );
+    expect(screen.getByRole("button", { name: "Draw area" }))
+      .toBeInTheDocument();
+  });
+
+  it("exposes the Zillow action and nearby-parks data contributions", async () => {
+    render(<MapWorkspace />);
+
+    expect(await screen.findByText("Centered near you")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "GO TO ZILLOW" }),
+    ).toBeDisabled();
+    expect(screen.getByText("Define an Area of Interest first."))
+      .toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "RESET" })).toBeDisabled();
+    expect(screen.getByLabelText("Filter")).toBeDisabled();
+    expect(screen.getByLabelText("Heatmap")).toBeDisabled();
+    expect(screen.getByText("No active filters")).toBeInTheDocument();
+    expect(screen.getByText("No active heatmaps")).toBeInTheDocument();
+    expect(screen.getByLabelText("Filter")).toHaveTextContent(
+      "Nearby parks · Park distance",
+    );
+    expect(screen.getByLabelText("Filter")).toHaveTextContent(
+      "Commute time · Commute time",
+    );
+    expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
+      "Nearby parks · Park influence",
+    );
+    expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
+      "Commute time · Commute time",
+    );
+    expect(screen.queryByText(/demo-places/i)).not.toBeInTheDocument();
+  });
+
+  it("requires confirmation before resetting the full workspace", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ tiles: [], parks: [] })),
+    );
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await drawArea(user);
+    await user.selectOptions(
+      screen.getByLabelText("Filter"),
+      "nearby-parks/distance",
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Heatmap"),
+      "nearby-parks/influence",
+    );
+
+    const resetButton = screen.getByRole("button", { name: "RESET" });
+    expect(resetButton).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Draw area" }))
+      .not.toBeInTheDocument();
+
+    await user.click(resetButton);
+    expect(
+      screen.getByRole("dialog", { name: "Reset the workspace?" }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1");
+
+    await user.click(resetButton);
+    await user.click(
+      screen.getByRole("button", { name: "Reset everything" }),
+    );
+
+    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("0");
+    expect(screen.getByRole("button", { name: "Draw area" })).toBeEnabled();
+    expect(screen.getByLabelText("Filter")).toBeDisabled();
+    expect(screen.getByLabelText("Heatmap")).toBeDisabled();
+    expect(screen.getByText("No active filters")).toBeInTheDocument();
+    expect(screen.getByText("No active heatmaps")).toBeInTheDocument();
+    expect(resetButton).toBeDisabled();
+  });
+
+  it("creates the drawn boundary in Zillow before opening a new tab", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
+        Response.json({ customRegionId: "saved-region" }),
+    );
+    const openMock = vi
+      .spyOn(window, "open")
+      .mockImplementation(() => null);
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await drawArea(user);
 
     const zillowButton = screen.getByRole("button", {
       name: "GO TO ZILLOW",
@@ -355,7 +521,7 @@ describe("MapWorkspace", () => {
     ]);
   });
 
-  it("renders park layers immediately while the base style is busy, then refreshes after movement", async () => {
+  it("renders park layers inside the Area of Interest without reloading on map movement", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
         tiles: [],
@@ -383,12 +549,14 @@ describe("MapWorkspace", () => {
     const user = userEvent.setup();
     render(<MapWorkspace />);
 
+    await drawArea(user);
     const filterSelector = await screen.findByLabelText("Filter");
     const map = (
       MapLibreMap as unknown as {
         lastInstance: {
           emit(name: string): void;
           getLayer(id: string): unknown;
+          getSource(id: string): { data: FeatureCollection } | undefined;
           setCenter(center: [number, number]): void;
           setStyleLoaded(value: boolean): void;
         };
@@ -401,16 +569,28 @@ describe("MapWorkspace", () => {
       "nearby-parks/distance",
     );
     await waitFor(() =>
-      expect(screen.getByTestId("region-count")).toHaveTextContent("2"),
+      expect(
+        map.getSource("filter-owned-regions-source")?.data.features,
+      ).toHaveLength(2),
     );
-    expect(screen.getByText(/2 filter-owned regions/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Clear all" })).toBeDisabled();
 
-    fireEvent.change(screen.getByRole("slider", { name: "Park distance" }), {
-      target: { value: "0" },
+    const parkDistanceSlider = screen.getByRole("slider", {
+      name: "Park distance",
     });
+    fireEvent.change(parkDistanceSlider, { target: { value: "150" } });
+    fireEvent.change(parkDistanceSlider, { target: { value: "0" } });
+    expect(screen.getByText("0 m")).toBeInTheDocument();
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+    expect(
+      map.getSource("filter-owned-regions-source")?.data.features,
+    ).toHaveLength(2);
+
+    fireEvent.pointerUp(parkDistanceSlider);
     await waitFor(
-      () => expect(screen.getByTestId("region-count")).toHaveTextContent("1"),
+      () =>
+        expect(
+          map.getSource("filter-owned-regions-source")?.data.features,
+        ).toHaveLength(1),
       { timeout: 2_000 },
     );
 
@@ -462,9 +642,8 @@ describe("MapWorkspace", () => {
     map.setStyleLoaded(true);
     map.setCenter([1, 52]);
     map.emit("moveend");
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2), {
-      timeout: 3_000,
-    });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("allows duplicate park heatmap instances", async () => {
@@ -480,6 +659,7 @@ describe("MapWorkspace", () => {
     const user = userEvent.setup();
     render(<MapWorkspace />);
 
+    await drawArea(user);
     const selector = await screen.findByLabelText("Heatmap");
     await user.selectOptions(selector, "nearby-parks/influence");
     await user.selectOptions(selector, "nearby-parks/influence");
@@ -512,33 +692,41 @@ describe("MapWorkspace", () => {
       [-84.5, 33.9],
       [-84.5, 33.6],
     ];
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).startsWith("/api/address-suggestions")) {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL, _init?: RequestInit) => {
+        if (String(input).startsWith("/api/address-suggestions")) {
+          return Response.json({
+            suggestions: [
+              {
+                label: "1 Peachtree St, Atlanta, GA",
+                address: "1 Peachtree St, Atlanta, GA",
+                center: [-84.388, 33.749],
+              },
+            ],
+          });
+        }
         return Response.json({
-          suggestions: [
+          type: "FeatureCollection",
+          features: [
             {
-              label: "1 Peachtree St, Atlanta, GA",
-              address: "1 Peachtree St, Atlanta, GA",
-              center: [-84.388, 33.749],
+              type: "Feature",
+              geometry: { type: "Polygon", coordinates: [polygon] },
+              properties: { minutes: 30 },
             },
           ],
         });
-      }
-      return Response.json({
-        type: "FeatureCollection",
-        features: [
-          {
-            type: "Feature",
-            geometry: { type: "Polygon", coordinates: [polygon] },
-            properties: { minutes: 30 },
-          },
-        ],
-      });
-    });
+      },
+    );
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<MapWorkspace />);
 
+    (
+      MapLibreMap as unknown as {
+        lastInstance: { setCenter(center: [number, number]): void };
+      }
+    ).lastInstance.setCenter([-84.35, 33.75]);
+    await drawArea(user);
     await user.selectOptions(
       await screen.findByLabelText("Filter"),
       "commute/time",
@@ -555,9 +743,7 @@ describe("MapWorkspace", () => {
       ),
     );
 
-    await waitFor(() =>
-      expect(screen.getByTestId("region-count")).toHaveTextContent("1"),
-    );
+    await screen.findByText("Active");
     expect(screen.getByRole("slider", { name: "Commute time" })).toHaveAttribute(
       "min",
       "5",
@@ -570,6 +756,29 @@ describe("MapWorkspace", () => {
       "step",
       "5",
     );
+    const commuteSlider = screen.getByRole("slider", {
+      name: "Commute time",
+    });
+    const isochroneRequestCount = () =>
+      fetchMock.mock.calls.filter(
+        ([input]) => String(input) === "/api/commute/isochrones",
+      ).length;
+    expect(isochroneRequestCount()).toBe(1);
+
+    fireEvent.change(commuteSlider, { target: { value: "35" } });
+    fireEvent.change(commuteSlider, { target: { value: "40" } });
+    expect(screen.getByText("40 min")).toBeInTheDocument();
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+    expect(isochroneRequestCount()).toBe(1);
+
+    fireEvent.pointerUp(commuteSlider);
+    await waitFor(() => expect(isochroneRequestCount()).toBe(2));
+    const latestIsochroneRequest = fetchMock.mock.calls
+      .filter(([input]) => String(input) === "/api/commute/isochrones")
+      .at(-1)?.[1] as RequestInit;
+    expect(JSON.parse(String(latestIsochroneRequest.body))).toMatchObject({
+      minutes: [40],
+    });
 
     const map = (
       MapLibreMap as unknown as {
@@ -595,6 +804,7 @@ describe("MapWorkspace", () => {
     const user = userEvent.setup();
     render(<MapWorkspace />);
 
+    await drawArea(user);
     await user.selectOptions(
       await screen.findByLabelText("Heatmap"),
       "commute/travel-time",

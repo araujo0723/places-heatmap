@@ -29,8 +29,13 @@ import {
   normalizeSurfaceHeatmap,
 } from "../core/composition";
 import {
+  areaOfInterestIsWithinLimit,
+  clipRegions,
   clipSurfaceCollection,
   intersectRegionGroups,
+  MAX_AREA_OF_INTEREST_DIMENSION_MILES,
+  regionBoundingBoxDimensionsMiles,
+  regionViewport,
 } from "../core/regions";
 import type {
   HostedPoint,
@@ -102,6 +107,15 @@ const EMPTY_SURFACE_COLLECTION: FeatureCollection<
   features: [],
 };
 const NEUTRAL_PREDICATE: PointPredicate = () => true;
+const AREA_OF_INTEREST_MASK_SOURCE_ID = "area-of-interest-mask-source";
+const AREA_OF_INTEREST_MASK_LAYER_ID = "area-of-interest-outside-mask";
+const WEB_MERCATOR_WORLD_RING: Array<[number, number]> = [
+  [-180, -85.051129],
+  [180, -85.051129],
+  [180, 85.051129],
+  [-180, 85.051129],
+  [-180, -85.051129],
+];
 const REGION_STYLE_PROPERTIES = {
   fillColor: "__hostFillColor",
   fillOpacity: "__hostFillOpacity",
@@ -174,6 +188,29 @@ function normalizeResolvedRegions(value: unknown) {
 
 function safeMapId(key: string) {
   return key.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function outsideAreaOfInterestMask(
+  areaOfInterest: Feature<Polygon> | undefined,
+): FeatureCollection<Polygon> {
+  return {
+    type: "FeatureCollection",
+    features: areaOfInterest
+      ? [
+          {
+            type: "Feature",
+            properties: {},
+            geometry: {
+              type: "Polygon",
+              coordinates: [
+                WEB_MERCATOR_WORLD_RING,
+                [...areaOfInterest.geometry.coordinates[0]].reverse(),
+              ],
+            },
+          },
+        ]
+      : [],
+  };
 }
 
 function baseStyle(tileUrl: string, attribution: string): StyleSpecification {
@@ -260,11 +297,12 @@ function SectionHeading({
   children?: ReactNode;
   countTestId?: string;
 }) {
+  const headingId = `${title.toLowerCase().replaceAll(/\s+/g, "-")}-heading`;
   return (
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
         <h2
-          id={`${title.toLowerCase()}-heading`}
+          id={headingId}
           className="text-xs font-bold tracking-[0.16em] text-slate-500 uppercase"
         >
           {title}
@@ -387,12 +425,12 @@ export default function MapWorkspace() {
   const drawRef = useRef<TerraDraw | null>(null);
   const activeDrawPointerRef = useRef<number | undefined>(undefined);
   const drawDraftRef = useRef<DrawPoint[]>([]);
+  const lastValidAreaRef = useRef<Feature<Polygon> | undefined>(undefined);
+  const restoringAreaRef = useRef(false);
+  const resettingDrawRef = useRef(false);
   const renderedLayerKeysRef = useRef(new Set<string>());
   const contributionInstanceRef = useRef(0);
   const lastLocationRef = useRef(readLastLocation());
-  const viewportTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
-    undefined,
-  );
 
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string>();
@@ -402,11 +440,8 @@ export default function MapWorkspace() {
     "cached" | "locating" | "located" | "unavailable"
   >(lastLocationRef.current ? "cached" : "locating");
   const [drawMode, setDrawMode] = useState<"select" | "freehand">("select");
-  const [regions, setRegions] = useState<Array<Feature<Polygon>>>([]);
-  const [viewportRevision, setViewportRevision] = useState(0);
-  const [selectedRegionIds, setSelectedRegionIds] = useState<
-    Array<string | number>
-  >([]);
+  const [areaOfInterest, setAreaOfInterest] = useState<Feature<Polygon>>();
+  const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
   const [activeHeatmaps, setActiveHeatmaps] = useState<ActiveHeatmap[]>([]);
   const [filterRuntime, setFilterRuntime] = useState<
@@ -511,8 +546,22 @@ export default function MapWorkspace() {
               drawInteraction: "click-drag",
               minDistance: 8,
               smoothing: 0.15,
+              styles: {
+                fillColor: "#64748b",
+                fillOpacity: 0,
+                outlineColor: "#64748b",
+                outlineOpacity: 0.9,
+                outlineWidth: 1,
+              },
             }),
             new TerraDrawSelectMode({
+              styles: {
+                selectedPolygonColor: "#64748b",
+                selectedPolygonFillOpacity: 0,
+                selectedPolygonOutlineColor: "#64748b",
+                selectedPolygonOutlineOpacity: 0.9,
+                selectedPolygonOutlineWidth: 1,
+              },
               flags: {
                 freehand: {
                   feature: {
@@ -529,7 +578,8 @@ export default function MapWorkspace() {
           ],
         });
 
-        const syncRegions = () => {
+        const syncAreaOfInterest = () => {
+          if (restoringAreaRef.current || resettingDrawRef.current) return;
           const polygons = draw
             .getSnapshot()
             .filter(
@@ -539,29 +589,57 @@ export default function MapWorkspace() {
                 feature.geometry.type === "Polygon",
             )
             .map((feature) => feature as Feature<Polygon>);
-          setRegions(polygons);
+
+          const polygon = polygons[0];
+          if (!polygon) {
+            const previous = lastValidAreaRef.current;
+            if (previous) {
+              restoringAreaRef.current = true;
+              draw.addFeatures([
+                previous as GeoJSONStoreFeatures<Polygon>,
+              ]);
+              restoringAreaRef.current = false;
+              setDrawError("Use RESET to remove the Area of Interest.");
+            }
+            return;
+          }
+
+          if (!areaOfInterestIsWithinLimit(polygon)) {
+            const previous = lastValidAreaRef.current;
+            if (previous && polygon.id !== undefined) {
+              restoringAreaRef.current = true;
+              draw.updateFeatureGeometry(polygon.id, previous.geometry);
+              restoringAreaRef.current = false;
+            }
+            setDrawError(
+              `The Area of Interest cannot be more than ${MAX_AREA_OF_INTEREST_DIMENSION_MILES} miles across.`,
+            );
+            return;
+          }
+
+          lastValidAreaRef.current = polygon;
+          setAreaOfInterest(polygon);
+          setDrawError(undefined);
         };
         const finishDrawing = () => {
-          syncRegions();
+          syncAreaOfInterest();
           draw.setMode("select");
           setDrawMode("select");
         };
-        const selectRegion = (id: string | number) => {
-          setSelectedRegionIds((current) =>
-            current.includes(id) ? current : [...current, id],
-          );
-        };
-        const deselectRegion = (id: string | number) => {
-          setSelectedRegionIds((current) =>
-            current.filter((candidate) => candidate !== id),
-          );
-        };
 
-        draw.on("change", syncRegions);
+        draw.on("change", syncAreaOfInterest);
         draw.on("finish", finishDrawing);
-        draw.on("select", selectRegion);
-        draw.on("deselect", deselectRegion);
         draw.start();
+        map.setPaintProperty(
+          "regions-polygon-outline",
+          "line-dasharray",
+          [1, 2],
+        );
+        map.setLayoutProperty(
+          "regions-polygon-outline",
+          "line-cap",
+          "round",
+        );
         draw.setMode("select");
 
         drawRef.current = draw;
@@ -573,20 +651,11 @@ export default function MapWorkspace() {
       const onError = (event: maplibregl.ErrorEvent) => {
         if (!map.loaded()) setMapError(event.error?.message ?? "Map failed to load.");
       };
-      const onMoveEnd = () => {
-        if (viewportTimerRef.current) clearTimeout(viewportTimerRef.current);
-        viewportTimerRef.current = setTimeout(
-          () => setViewportRevision((revision) => revision + 1),
-          400,
-        );
-      };
 
       map.on("load", onLoad);
       map.on("error", onError);
-      map.on("moveend", onMoveEnd);
 
       return () => {
-        if (viewportTimerRef.current) clearTimeout(viewportTimerRef.current);
         drawRef.current?.stop();
         drawRef.current = null;
         map.remove();
@@ -598,7 +667,47 @@ export default function MapWorkspace() {
   }, []);
 
   useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+
+    const collection = outsideAreaOfInterestMask(areaOfInterest);
+    const source = map.getSource(
+      AREA_OF_INTEREST_MASK_SOURCE_ID,
+    ) as GeoJSONSource | undefined;
+    if (source) {
+      source.setData(collection);
+    } else {
+      map.addSource(AREA_OF_INTEREST_MASK_SOURCE_ID, {
+        type: "geojson",
+        data: collection,
+      });
+    }
+
+    if (!map.getLayer(AREA_OF_INTEREST_MASK_LAYER_ID)) {
+      const beforeId = map.getLayer("regions-polygon")
+        ? "regions-polygon"
+        : undefined;
+      map.addLayer(
+        {
+          id: AREA_OF_INTEREST_MASK_LAYER_ID,
+          source: AREA_OF_INTEREST_MASK_SOURCE_ID,
+          type: "fill",
+          paint: {
+            "fill-color": "#64748b",
+            "fill-opacity": 0.48,
+          },
+        },
+        beforeId,
+      );
+    }
+  }, [areaOfInterest, mapReady]);
+
+  useEffect(() => {
     const controller = new AbortController();
+    if (!areaOfInterest) {
+      setFilterRuntime({});
+      return () => controller.abort();
+    }
     const activeKeys = new Set(
       activeFilters.map(({ instanceId }) => instanceId),
     );
@@ -619,7 +728,7 @@ export default function MapWorkspace() {
     for (const selection of activeFilters) {
       const context = {
         signal: controller.signal,
-        viewport: currentViewport(),
+        viewport: regionViewport(areaOfInterest),
         randomSeed: selection.randomSeed,
       };
       const predicatePromise = selection.entry.contribution.resolvePredicate
@@ -672,10 +781,14 @@ export default function MapWorkspace() {
     }
 
     return () => controller.abort();
-  }, [activeFilters, viewportRevision]);
+  }, [activeFilters, areaOfInterest]);
 
   useEffect(() => {
     const controller = new AbortController();
+    if (!areaOfInterest) {
+      setHeatmapRuntime({});
+      return () => controller.abort();
+    }
     const activeKeys = new Set(
       activeHeatmaps.map(({ instanceId }) => instanceId),
     );
@@ -697,7 +810,7 @@ export default function MapWorkspace() {
       const contribution = selection.entry.contribution;
       const context = {
         signal: controller.signal,
-        viewport: currentViewport(),
+        viewport: regionViewport(areaOfInterest),
         randomSeed: selection.randomSeed,
       };
       const load =
@@ -748,7 +861,7 @@ export default function MapWorkspace() {
     }
 
     return () => controller.abort();
-  }, [activeHeatmaps, viewportRevision]);
+  }, [activeHeatmaps, areaOfInterest]);
 
   const predicates = useMemo(
     () =>
@@ -797,34 +910,34 @@ export default function MapWorkspace() {
       ),
     [activeFilters, filterRuntime],
   );
-  const ownedRegionCount = useMemo(
+  const visibleOwnedRegions = useMemo(
     () =>
-      activeFilters.reduce(
-        (count, { instanceId }) =>
-          count + (filterRuntime[instanceId]?.regionCount ?? 0),
-        0,
-      ),
-    [activeFilters, filterRuntime],
+      areaOfInterest
+        ? clipRegions(ownedRegions, [areaOfInterest])
+        : [],
+    [areaOfInterest, ownedRegions],
   );
-  const allRegions = useMemo<RegionFeature[]>(
-    () => [...regions, ...ownedRegions],
-    [ownedRegions, regions],
-  );
-  const actionRegions = useMemo<FeatureCollection<RegionGeometry>>(() => {
-    const boundary = intersectRegionGroups([
-      regions,
+  const constrainedBoundary = useMemo(() => {
+    if (!areaOfInterest) return undefined;
+    return intersectRegionGroups([
+      [areaOfInterest],
       ...activeFilters.map(
         ({ instanceId }) => filterRuntime[instanceId]?.regions ?? [],
       ),
     ]);
+  }, [activeFilters, areaOfInterest, filterRuntime]);
+  const actionRegions = useMemo<FeatureCollection<RegionGeometry>>(() => {
     return {
       type: "FeatureCollection",
-      features: boundary ? [boundary] : [],
+      features: constrainedBoundary ? [constrainedBoundary] : [],
     };
-  }, [activeFilters, filterRuntime, regions]);
-  const actionViewport = currentViewport();
+  }, [constrainedBoundary]);
+  const actionViewport = areaOfInterest
+    ? regionViewport(areaOfInterest)
+    : currentViewport();
   const actionsDisabled =
     !mapReady ||
+    !areaOfInterest ||
     activeFilters.some(
       ({ instanceId, entry }) => {
         const runtime = filterRuntime[instanceId];
@@ -846,9 +959,9 @@ export default function MapWorkspace() {
       const points = heatmapRuntime[instanceId]?.points ?? [];
       groups.set(instanceId, {
         type: "FeatureCollection",
-        features: filtersBlocked
+        features: filtersBlocked || !constrainedBoundary
           ? []
-          : composePoints(points, predicates, allRegions).map(
+          : composePoints(points, predicates, [constrainedBoundary]).map(
               ({ feature }) => feature,
             ),
       });
@@ -859,7 +972,7 @@ export default function MapWorkspace() {
     filtersBlocked,
     heatmapRuntime,
     predicates,
-    allRegions,
+    constrainedBoundary,
   ]);
 
   const surfaceCollections = useMemo(() => {
@@ -871,10 +984,15 @@ export default function MapWorkspace() {
       if (entry.contribution.kind !== "surface") continue;
       const surface =
         heatmapRuntime[instanceId]?.surface ?? EMPTY_SURFACE_COLLECTION;
-      groups.set(instanceId, clipSurfaceCollection(surface, allRegions));
+      groups.set(
+        instanceId,
+        constrainedBoundary
+          ? clipSurfaceCollection(surface, [constrainedBoundary])
+          : EMPTY_SURFACE_COLLECTION,
+      );
     }
     return groups;
-  }, [activeHeatmaps, allRegions, heatmapRuntime]);
+  }, [activeHeatmaps, constrainedBoundary, heatmapRuntime]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -998,7 +1116,7 @@ export default function MapWorkspace() {
     const lineLayerId = "filter-owned-regions-line";
     const collection: FeatureCollection<RegionGeometry> = {
       type: "FeatureCollection",
-      features: ownedRegions,
+      features: visibleOwnedRegions,
     };
     const source = map.getSource(sourceId) as GeoJSONSource | undefined;
     if (source) {
@@ -1058,7 +1176,7 @@ export default function MapWorkspace() {
         beforeId,
       );
     }
-  }, [mapReady, ownedRegions]);
+  }, [mapReady, visibleOwnedRegions]);
 
   const addFilter = (key: string) => {
     const entry = extensionRegistry.filters.find(
@@ -1106,16 +1224,7 @@ export default function MapWorkspace() {
     drawDraftRef.current = [];
     setDrawDraft([]);
     setDrawError(undefined);
-    setSelectedRegionIds([]);
     setDrawMode("freehand");
-  };
-  const startEditing = () => {
-    drawRef.current?.setMode("select");
-    activeDrawPointerRef.current = undefined;
-    drawDraftRef.current = [];
-    setDrawDraft([]);
-    setDrawError(undefined);
-    setDrawMode("select");
   };
   const drawPointFromEvent = (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -1213,6 +1322,14 @@ export default function MapWorkspace() {
         coordinates: [closedCoordinates],
       },
     };
+    if (!areaOfInterestIsWithinLimit(feature)) {
+      const { largest } = regionBoundingBoxDimensionsMiles(feature);
+      updateDrawDraft([]);
+      setDrawError(
+        `The Area of Interest is ${largest.toFixed(1)} miles across. It cannot be more than ${MAX_AREA_OF_INTEREST_DIMENSION_MILES} miles.`,
+      );
+      return;
+    }
     const [validation] = draw.addFeatures([feature]);
 
     if (!validation?.valid) {
@@ -1222,12 +1339,8 @@ export default function MapWorkspace() {
     }
 
     updateDrawDraft([]);
-    setRegions(
-      draw
-        .getSnapshot()
-        .filter((candidate) => candidate.geometry.type === "Polygon")
-        .map((candidate) => candidate as Feature<Polygon>),
-    );
+    lastValidAreaRef.current = feature;
+    setAreaOfInterest(feature);
     draw.setMode("select");
     setDrawMode("select");
   };
@@ -1248,21 +1361,23 @@ export default function MapWorkspace() {
           )
           .join(" ")} Z`
       : undefined;
-  const deleteSelectedRegions = () => {
-    if (!drawRef.current || selectedRegionIds.length === 0) return;
-    drawRef.current.removeFeatures(selectedRegionIds);
-    setSelectedRegionIds([]);
-    setRegions(
-      drawRef.current
-        .getSnapshot()
-        .filter((feature) => feature.geometry.type === "Polygon")
-        .map((feature) => feature as Feature<Polygon>),
-    );
-  };
-  const clearRegions = () => {
+  const resetWorkspace = () => {
+    resettingDrawRef.current = true;
+    lastValidAreaRef.current = undefined;
     drawRef.current?.clear();
-    setRegions([]);
-    setSelectedRegionIds([]);
+    resettingDrawRef.current = false;
+    activeDrawPointerRef.current = undefined;
+    drawDraftRef.current = [];
+    setDrawDraft([]);
+    setDrawMode("select");
+    drawRef.current?.setMode("select");
+    setAreaOfInterest(undefined);
+    setActiveFilters([]);
+    setActiveHeatmaps([]);
+    setFilterRuntime({});
+    setHeatmapRuntime({});
+    setDrawError(undefined);
+    setResetConfirmationOpen(false);
   };
 
   return (
@@ -1290,9 +1405,10 @@ export default function MapWorkspace() {
               <path
                 data-testid="draw-preview"
                 d={drawPreviewPath}
-                fill="rgba(79, 70, 229, 0.20)"
-                stroke="rgba(67, 56, 202, 0.95)"
-                strokeWidth="3"
+                fill="none"
+                stroke="#64748b"
+                strokeDasharray="2 4"
+                strokeWidth="1.5"
                 strokeLinejoin="round"
                 strokeLinecap="round"
               />
@@ -1303,16 +1419,28 @@ export default function MapWorkspace() {
 
       <aside className="absolute top-4 bottom-4 left-4 z-10 flex w-96 flex-col overflow-hidden rounded-2xl border border-white/70 bg-white/95 shadow-2xl shadow-slate-900/20 backdrop-blur">
         <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
-          <section className="space-y-3" aria-labelledby="regions-heading">
+          <button
+            className="w-full rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-bold tracking-wide text-rose-700 hover:bg-rose-50 focus:ring-2 focus:ring-rose-300 focus:outline-none disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300 disabled:hover:bg-white"
+            type="button"
+            disabled={!areaOfInterest}
+            onClick={() => setResetConfirmationOpen(true)}
+          >
+            RESET
+          </button>
+
+          <section
+            className="space-y-3"
+            aria-labelledby="area-of-interest-heading"
+          >
             <SectionHeading
-              title="Regions"
-              count={regions.length + ownedRegionCount}
-              countTestId="region-count"
+              title="Area of interest"
+              count={areaOfInterest ? 1 : 0}
+              countTestId="area-of-interest-count"
             />
-            <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-              <div className="grid grid-cols-2 gap-2">
+            {!areaOfInterest ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
                 <button
-                  className={`rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-indigo-300 focus:outline-none ${
+                  className={`w-full rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-indigo-300 focus:outline-none ${
                     drawMode === "freehand"
                       ? "bg-indigo-600 text-white shadow-sm"
                       : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
@@ -1322,52 +1450,27 @@ export default function MapWorkspace() {
                   aria-pressed={drawMode === "freehand"}
                   onClick={startDrawing}
                 >
-                  Draw region
+                  Draw area
                 </button>
-                <button
-                  className={`rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-indigo-300 focus:outline-none ${
-                    drawMode === "select"
-                      ? "bg-indigo-600 text-white shadow-sm"
-                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
-                  type="button"
-                  disabled={!mapReady}
-                  aria-pressed={drawMode === "select"}
-                  onClick={startEditing}
-                >
-                  Select & edit
-                </button>
-                <button
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-slate-300 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
-                  type="button"
-                  disabled={selectedRegionIds.length === 0}
-                  onClick={deleteSelectedRegions}
-                >
-                  Delete selected
-                </button>
-                <button
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-slate-300 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
-                  type="button"
-                  disabled={regions.length === 0}
-                  onClick={clearRegions}
-                >
-                  Clear all
-                </button>
+                {drawMode === "freehand" ? (
+                  <p className="mt-3 text-[11px] leading-4 text-slate-500">
+                    Press and drag on the map to trace an area no more than{" "}
+                    {MAX_AREA_OF_INTEREST_DIMENSION_MILES} miles across. Map
+                    panning is paused.
+                  </p>
+                ) : null}
               </div>
-              {drawMode === "freehand" ? (
-                <p className="mt-3 text-[11px] leading-4 text-slate-500">
-                  Press and drag on the map to trace a region. Map panning is
-                  paused.
+            ) : (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
+                <p className="text-xs font-semibold text-emerald-800">
+                  Area defined
                 </p>
-              ) : null}
-              {ownedRegionCount > 0 ? (
                 <p className="mt-3 text-[11px] leading-4 text-slate-500">
-                  {ownedRegionCount} filter-owned{" "}
-                  {ownedRegionCount === 1 ? "region is" : "regions are"} managed
-                  by active filters and cannot be edited here.
+                  Select the area on the map to move it or edit its boundary.
+                  Filters and heatmaps are clipped to this area.
                 </p>
-              ) : null}
-            </div>
+              </div>
+            )}
           </section>
 
           {extensionRegistry.actions.length > 0 ? (
@@ -1401,7 +1504,7 @@ export default function MapWorkspace() {
                 label: `${entry.extension.name} · ${entry.contribution.name}`,
               }))}
               onAdd={addFilter}
-              disabled={!mapReady}
+              disabled={!mapReady || !areaOfInterest}
             />
             {activeFilters.length === 0 ? (
               <EmptyState>No active filters</EmptyState>
@@ -1486,7 +1589,7 @@ export default function MapWorkspace() {
                 label: `${entry.extension.name} · ${entry.contribution.name}`,
               }))}
               onAdd={addHeatmap}
-              disabled={!mapReady}
+              disabled={!mapReady || !areaOfInterest}
             />
             {activeHeatmaps.length === 0 ? (
               <EmptyState>No active heatmaps</EmptyState>
@@ -1578,6 +1681,56 @@ export default function MapWorkspace() {
           ) : null}
         </div>
       </aside>
+
+      {resetConfirmationOpen ? (
+        <div
+          className="absolute inset-0 z-30 grid place-items-center bg-slate-950/45 p-6 backdrop-blur-sm"
+          role="presentation"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setResetConfirmationOpen(false);
+            }
+          }}
+        >
+          <div
+            aria-describedby="reset-workspace-description"
+            aria-labelledby="reset-workspace-title"
+            aria-modal="true"
+            className="w-full max-w-md rounded-2xl border border-white/80 bg-white p-5 shadow-2xl"
+            role="dialog"
+          >
+            <h2
+              id="reset-workspace-title"
+              className="text-base font-bold text-slate-900"
+            >
+              Reset the workspace?
+            </h2>
+            <p
+              id="reset-workspace-description"
+              className="mt-2 text-sm leading-5 text-slate-600"
+            >
+              This removes the Area of Interest and all configured filters and
+              heatmaps from the map.
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-slate-300 focus:outline-none"
+                type="button"
+                onClick={() => setResetConfirmationOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 focus:ring-2 focus:ring-rose-300 focus:outline-none"
+                type="button"
+                onClick={resetWorkspace}
+              >
+                Reset everything
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div
         className="absolute right-4 bottom-8 z-20 flex max-w-sm flex-col items-end gap-2"

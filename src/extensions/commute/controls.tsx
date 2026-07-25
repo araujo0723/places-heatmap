@@ -166,16 +166,18 @@ export function CommuteFilterControls({
   loading,
 }: ControlProps<CommuteFilterState>) {
   const [minutes, setMinutes] = useState(value.minutes);
+  const committedMinutes = useRef(value.minutes);
 
-  useEffect(() => setMinutes(value.minutes), [value.minutes]);
   useEffect(() => {
-    if (minutes === value.minutes) return;
-    const timeout = window.setTimeout(
-      () => onChange({ ...value, minutes }),
-      250,
-    );
-    return () => window.clearTimeout(timeout);
-  }, [minutes, onChange, value]);
+    committedMinutes.current = value.minutes;
+    setMinutes(value.minutes);
+  }, [value.minutes]);
+
+  const commitMinutes = (nextMinutes: number) => {
+    if (nextMinutes === committedMinutes.current) return;
+    committedMinutes.current = nextMinutes;
+    onChange({ ...value, minutes: nextMinutes });
+  };
 
   return (
     <div className="space-y-4">
@@ -201,6 +203,18 @@ export function CommuteFilterControls({
           type="range"
           value={minutes}
           onChange={(event) => setMinutes(Number(event.currentTarget.value))}
+          onBlur={(event) =>
+            commitMinutes(Number(event.currentTarget.value))
+          }
+          onKeyUp={(event) =>
+            commitMinutes(Number(event.currentTarget.value))
+          }
+          onPointerCancel={(event) =>
+            commitMinutes(Number(event.currentTarget.value))
+          }
+          onPointerUp={(event) =>
+            commitMinutes(Number(event.currentTarget.value))
+          }
         />
       </label>
     </div>

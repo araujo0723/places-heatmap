@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ControlProps } from "../api";
 import { defineExtension } from "../api";
 import { loadNearbyParks } from "./data";
@@ -15,13 +15,18 @@ function DistanceControls({
   loading,
 }: ControlProps<ParkFilterState>) {
   const [distance, setDistance] = useState(value.distance);
+  const committedDistance = useRef(value.distance);
 
-  useEffect(() => setDistance(value.distance), [value.distance]);
   useEffect(() => {
-    if (distance === value.distance) return;
-    const timeout = setTimeout(() => onChange({ distance }), 250);
-    return () => clearTimeout(timeout);
-  }, [distance, onChange, value.distance]);
+    committedDistance.current = value.distance;
+    setDistance(value.distance);
+  }, [value.distance]);
+
+  const commitDistance = (nextDistance: number) => {
+    if (nextDistance === committedDistance.current) return;
+    committedDistance.current = nextDistance;
+    onChange({ distance: nextDistance });
+  };
 
   return (
     <label className="block text-xs text-slate-600">
@@ -41,6 +46,18 @@ function DistanceControls({
         value={distance}
         disabled={disabled || loading}
         onChange={(event) => setDistance(Number(event.currentTarget.value))}
+        onBlur={(event) =>
+          commitDistance(Number(event.currentTarget.value))
+        }
+        onKeyUp={(event) =>
+          commitDistance(Number(event.currentTarget.value))
+        }
+        onPointerCancel={(event) =>
+          commitDistance(Number(event.currentTarget.value))
+        }
+        onPointerUp={(event) =>
+          commitDistance(Number(event.currentTarget.value))
+        }
       />
     </label>
   );
