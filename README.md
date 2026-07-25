@@ -147,3 +147,19 @@ shares six-hour, zoom-11 tile caches between its filter and heatmap.
   contour bands fading to zero at 300 m.
 - Views covering more than 25 cache tiles retain stale data and ask the user to
   zoom in.
+
+## Commute time
+
+The bundled Commute time extension looks up and validates destination addresses
+before requesting driving isochrones from openrouteservice. Set `ORS_API_KEY`
+in `.env` to enable both contributions:
+
+- **Commute time** under Filters draws a red outline and constrains all active
+  data to the selected 5–60 minute region. The slider advances in five-minute
+  intervals.
+- **Commute time** under Heatmaps accepts only an address. It renders exact
+  20- and 40-minute contours with additional five-minute transition bands,
+  fading from green through yellow to transparent.
+
+Address suggestions use openrouteservice when configured and fall back to
+Nominatim. Routing requests and the API key remain server-side.

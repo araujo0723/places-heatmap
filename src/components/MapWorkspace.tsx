@@ -102,6 +102,13 @@ const EMPTY_SURFACE_COLLECTION: FeatureCollection<
   features: [],
 };
 const NEUTRAL_PREDICATE: PointPredicate = () => true;
+const REGION_STYLE_PROPERTIES = {
+  fillColor: "__hostFillColor",
+  fillOpacity: "__hostFillOpacity",
+  lineColor: "__hostLineColor",
+  lineWidth: "__hostLineWidth",
+  lineOpacity: "__hostLineOpacity",
+} as const;
 
 function readLastLocation(): [number, number] | undefined {
   try {
@@ -753,7 +760,40 @@ export default function MapWorkspace() {
   const ownedRegions = useMemo(
     () =>
       activeFilters.flatMap(
-        ({ instanceId }) => filterRuntime[instanceId]?.regions ?? [],
+        ({ instanceId, entry }) =>
+          (filterRuntime[instanceId]?.regions ?? []).map((region) => {
+            const style = entry.contribution.regionStyle;
+            if (!style) return region;
+            return {
+              ...region,
+              properties: {
+                ...region.properties,
+                ...(style.fillColor
+                  ? { [REGION_STYLE_PROPERTIES.fillColor]: style.fillColor }
+                  : {}),
+                ...(style.fillOpacity !== undefined
+                  ? {
+                      [REGION_STYLE_PROPERTIES.fillOpacity]:
+                        style.fillOpacity,
+                    }
+                  : {}),
+                ...(style.lineColor
+                  ? { [REGION_STYLE_PROPERTIES.lineColor]: style.lineColor }
+                  : {}),
+                ...(style.lineWidth !== undefined
+                  ? {
+                      [REGION_STYLE_PROPERTIES.lineWidth]: style.lineWidth,
+                    }
+                  : {}),
+                ...(style.lineOpacity !== undefined
+                  ? {
+                      [REGION_STYLE_PROPERTIES.lineOpacity]:
+                        style.lineOpacity,
+                    }
+                  : {}),
+              },
+            };
+          }),
       ),
     [activeFilters, filterRuntime],
   );
@@ -976,8 +1016,16 @@ export default function MapWorkspace() {
           source: sourceId,
           type: "fill",
           paint: {
-            "fill-color": "#16a34a",
-            "fill-opacity": 0.16,
+            "fill-color": [
+              "coalesce",
+              ["get", REGION_STYLE_PROPERTIES.fillColor],
+              "#16a34a",
+            ],
+            "fill-opacity": [
+              "coalesce",
+              ["get", REGION_STYLE_PROPERTIES.fillOpacity],
+              0.16,
+            ],
           },
         },
         beforeId,
@@ -990,9 +1038,21 @@ export default function MapWorkspace() {
           source: sourceId,
           type: "line",
           paint: {
-            "line-color": "#15803d",
-            "line-width": 2,
-            "line-opacity": 0.8,
+            "line-color": [
+              "coalesce",
+              ["get", REGION_STYLE_PROPERTIES.lineColor],
+              "#15803d",
+            ],
+            "line-width": [
+              "coalesce",
+              ["get", REGION_STYLE_PROPERTIES.lineWidth],
+              2,
+            ],
+            "line-opacity": [
+              "coalesce",
+              ["get", REGION_STYLE_PROPERTIES.lineOpacity],
+              0.8,
+            ],
           },
         },
         beforeId,

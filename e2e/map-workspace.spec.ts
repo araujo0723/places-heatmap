@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
   );
 });
 
-test("starts with the Zillow action and nearby-parks data contributions", async ({ page }) => {
+test("starts with the bundled data contributions", async ({ page }) => {
   await page.goto("/");
 
   await expect(page.getByTestId("location-status")).toHaveText(
@@ -29,16 +29,22 @@ test("starts with the Zillow action and nearby-parks data contributions", async 
   await expect(page.getByRole("button", { name: "GO TO ZILLOW" })).toBeDisabled();
   await expect(page.getByText("Places workspace")).toHaveCount(0);
   await expect(page.getByText("Explore the map")).toHaveCount(0);
-  await expect(page.getByLabel("Filter").locator("option")).toHaveCount(2);
-  await expect(page.getByLabel("Heatmap").locator("option")).toHaveCount(2);
+  const filterSelector = page.getByLabel("Filter", { exact: true });
+  const heatmapSelector = page.getByLabel("Heatmap", { exact: true });
+  await expect(filterSelector.locator("option")).toHaveCount(3);
+  await expect(heatmapSelector.locator("option")).toHaveCount(3);
   await expect(
-    page.getByLabel("Filter").locator('option[value="nearby-parks/distance"]'),
+    filterSelector.locator('option[value="nearby-parks/distance"]'),
   ).toHaveText("Nearby parks · Park distance");
   await expect(
-    page
-      .getByLabel("Heatmap")
-      .locator('option[value="nearby-parks/influence"]'),
+    heatmapSelector.locator('option[value="nearby-parks/influence"]'),
   ).toHaveText("Nearby parks · Park influence");
+  await expect(
+    filterSelector.locator('option[value="commute/time"]'),
+  ).toHaveText("Commute time · Commute time");
+  await expect(
+    heatmapSelector.locator('option[value="commute/travel-time"]'),
+  ).toHaveText("Commute time · Commute time");
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -82,7 +88,9 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
   });
   await page.goto("/");
 
-  await page.getByLabel("Filter").selectOption("nearby-parks/distance");
+  await page
+    .getByLabel("Filter", { exact: true })
+    .selectOption("nearby-parks/distance");
   await expect(page.getByTestId("region-count")).toHaveText("2");
   await expect(page.getByText(/2 filter-owned regions/)).toBeVisible();
   await expect(page.getByRole("button", { name: "Clear all" })).toBeDisabled();
@@ -90,7 +98,9 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
   await page.getByRole("slider", { name: "Park distance" }).fill("0");
   await expect(page.getByTestId("region-count")).toHaveText("1");
 
-  await page.getByLabel("Heatmap").selectOption("nearby-parks/influence");
+  await page
+    .getByLabel("Heatmap", { exact: true })
+    .selectOption("nearby-parks/influence");
   await expect(page.getByTestId("map-active-summary")).toContainText(
     "Park influence2",
   );

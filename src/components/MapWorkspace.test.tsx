@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { FeatureCollection } from "geojson";
 import { vi } from "vitest";
 
 vi.mock("maplibre-gl", () => {
@@ -257,8 +258,14 @@ describe("MapWorkspace", () => {
     expect(screen.getByLabelText("Filter")).toHaveTextContent(
       "Nearby parks · Park distance",
     );
+    expect(screen.getByLabelText("Filter")).toHaveTextContent(
+      "Commute time · Commute time",
+    );
     expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
       "Nearby parks · Park influence",
+    );
+    expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
+      "Commute time · Commute time",
     );
     expect(screen.queryByText(/demo-places/i)).not.toBeInTheDocument();
   });
@@ -422,12 +429,20 @@ describe("MapWorkspace", () => {
 
     expect(map.getLayer("filter-owned-regions-fill")).toMatchObject({
       paint: {
-        "fill-color": "#16a34a",
+        "fill-color": [
+          "coalesce",
+          ["get", "__hostFillColor"],
+          "#16a34a",
+        ],
       },
     });
     expect(map.getLayer("filter-owned-regions-line")).toMatchObject({
       paint: {
-        "line-color": "#15803d",
+        "line-color": [
+          "coalesce",
+          ["get", "__hostLineColor"],
+          "#15803d",
+        ],
       },
     });
     expect(map.getLayer("extension-surface-heatmap-2")).toMatchObject({
@@ -487,6 +502,110 @@ describe("MapWorkspace", () => {
         name: "Remove Park influence",
       }),
     ).toHaveLength(1);
+  });
+
+  it("looks up a commute address and draws the selected red filter outline", async () => {
+    const polygon = [
+      [-84.5, 33.6],
+      [-84.2, 33.6],
+      [-84.2, 33.9],
+      [-84.5, 33.9],
+      [-84.5, 33.6],
+    ];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith("/api/address-suggestions")) {
+        return Response.json({
+          suggestions: [
+            {
+              label: "1 Peachtree St, Atlanta, GA",
+              address: "1 Peachtree St, Atlanta, GA",
+              center: [-84.388, 33.749],
+            },
+          ],
+        });
+      }
+      return Response.json({
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            geometry: { type: "Polygon", coordinates: [polygon] },
+            properties: { minutes: 30 },
+          },
+        ],
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await user.selectOptions(
+      await screen.findByLabelText("Filter"),
+      "commute/time",
+    );
+    const addressInput = screen.getByRole("textbox", {
+      name: "Commute address",
+    });
+    await user.type(addressInput, "Peachtree");
+    await user.click(
+      await screen.findByRole(
+        "button",
+        { name: "1 Peachtree St, Atlanta, GA" },
+        { timeout: 2_000 },
+      ),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId("region-count")).toHaveTextContent("1"),
+    );
+    expect(screen.getByRole("slider", { name: "Commute time" })).toHaveAttribute(
+      "min",
+      "5",
+    );
+    expect(screen.getByRole("slider", { name: "Commute time" })).toHaveAttribute(
+      "max",
+      "60",
+    );
+    expect(screen.getByRole("slider", { name: "Commute time" })).toHaveAttribute(
+      "step",
+      "5",
+    );
+
+    const map = (
+      MapLibreMap as unknown as {
+        lastInstance: {
+          getSource(id: string): { data: FeatureCollection } | undefined;
+        };
+      }
+    ).lastInstance;
+    expect(
+      map.getSource("filter-owned-regions-source")?.data.features[0].properties,
+    ).toMatchObject({
+      __hostFillColor: "#dc2626",
+      __hostLineColor: "#dc2626",
+      __hostLineWidth: 2.5,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/commute/isochrones",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("exposes only the address control for the commute heatmap", async () => {
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await user.selectOptions(
+      await screen.findByLabelText("Heatmap"),
+      "commute/travel-time",
+    );
+
+    expect(
+      screen.getByRole("textbox", { name: "Commute address" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("slider", { name: "Commute time" }),
+    ).not.toBeInTheDocument();
   });
 
   it("starts at and refreshes the saved location without animation", async () => {

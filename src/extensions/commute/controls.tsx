@@ -1,0 +1,222 @@
+import { useEffect, useId, useRef, useState } from "react";
+import type { ControlProps } from "../api";
+import {
+  searchAddresses,
+  type AddressSelection,
+} from "./data";
+
+export interface CommuteFilterState {
+  address?: AddressSelection;
+  minutes: number;
+}
+
+export interface CommuteHeatmapState {
+  address?: AddressSelection;
+}
+
+function AddressPicker({
+  address,
+  onChange,
+  disabled,
+}: {
+  address?: AddressSelection;
+  onChange: (address: AddressSelection | undefined) => void;
+  disabled: boolean;
+}) {
+  const listId = useId();
+  const requestSequence = useRef(0);
+  const [query, setQuery] = useState(address?.address ?? "");
+  const [suggestions, setSuggestions] = useState<AddressSelection[]>([]);
+  const [message, setMessage] = useState<string>();
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    if (address && query !== address.address) setQuery(address.address);
+  }, [address, query]);
+
+  useEffect(() => {
+    const normalized = query.trim();
+    if (address && normalized === address.address) {
+      setSuggestions([]);
+      setMessage(undefined);
+      setSearching(false);
+      return;
+    }
+    if (normalized.length < 3) {
+      setSuggestions([]);
+      setMessage(
+        normalized.length > 0
+          ? "Type at least 3 characters to search."
+          : undefined,
+      );
+      setSearching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      const sequence = ++requestSequence.current;
+      setSearching(true);
+      setMessage(undefined);
+      try {
+        const results = await searchAddresses(normalized, controller.signal);
+        if (sequence !== requestSequence.current) return;
+        setSuggestions(results);
+        setMessage(
+          results.length === 0
+            ? "No matching addresses found. Try a fuller address."
+            : undefined,
+        );
+      } catch (error) {
+        if (controller.signal.aborted || sequence !== requestSequence.current)
+          return;
+        setSuggestions([]);
+        setMessage(
+          error instanceof Error ? error.message : "Address lookup failed.",
+        );
+      } finally {
+        if (sequence === requestSequence.current) setSearching(false);
+      }
+    }, 320);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [address, query]);
+
+  return (
+    <div className="space-y-2">
+      <label className="block text-xs font-medium text-slate-600">
+        Address
+        <span className="relative mt-1.5 block">
+          <input
+            aria-label="Commute address"
+            aria-autocomplete="list"
+            aria-controls={listId}
+            aria-expanded={suggestions.length > 0}
+            autoComplete="off"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 pr-8 text-xs text-slate-800 shadow-sm focus:border-red-400 focus:ring-2 focus:ring-red-100 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
+            disabled={disabled}
+            placeholder="Start typing an address"
+            type="text"
+            value={query}
+            onChange={(event) => {
+              const nextQuery = event.currentTarget.value;
+              setQuery(nextQuery);
+              setSuggestions([]);
+              setMessage(undefined);
+              if (address) onChange(undefined);
+            }}
+          />
+          {searching ? (
+            <span
+              aria-hidden="true"
+              className="absolute top-1/2 right-3 h-3 w-3 -translate-y-1/2 animate-spin rounded-full border-2 border-slate-300 border-t-red-500"
+            />
+          ) : null}
+        </span>
+      </label>
+      {suggestions.length > 0 ? (
+        <ul
+          className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+          id={listId}
+          role="listbox"
+        >
+          {suggestions.map((suggestion) => (
+            <li
+              key={`${suggestion.address}-${suggestion.center.join(",")}`}
+              role="option"
+              aria-selected={false}
+            >
+              <button
+                className="w-full px-3 py-2 text-left text-[11px] leading-4 text-slate-700 hover:bg-red-50 focus:bg-red-50 focus:outline-none"
+                type="button"
+                onClick={() => {
+                  setQuery(suggestion.address);
+                  setSuggestions([]);
+                  setMessage(undefined);
+                  onChange(suggestion);
+                }}
+              >
+                {suggestion.address}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {message ? (
+        <p className="text-[11px] leading-4 text-slate-500" aria-live="polite">
+          {message}
+        </p>
+      ) : null}
+      {address ? (
+        <p className="text-[11px] font-medium text-emerald-700">
+          Valid address selected
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+export function CommuteFilterControls({
+  value,
+  onChange,
+  disabled,
+  loading,
+}: ControlProps<CommuteFilterState>) {
+  const [minutes, setMinutes] = useState(value.minutes);
+
+  useEffect(() => setMinutes(value.minutes), [value.minutes]);
+  useEffect(() => {
+    if (minutes === value.minutes) return;
+    const timeout = window.setTimeout(
+      () => onChange({ ...value, minutes }),
+      250,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [minutes, onChange, value]);
+
+  return (
+    <div className="space-y-4">
+      <AddressPicker
+        address={value.address}
+        disabled={disabled}
+        onChange={(address) => onChange({ ...value, address })}
+      />
+      <label className="block text-xs text-slate-600">
+        <span className="mb-2 flex items-center justify-between font-medium">
+          Commute time
+          <output className="rounded-md bg-red-50 px-2 py-0.5 font-semibold text-red-700">
+            {minutes} min
+          </output>
+        </span>
+        <input
+          aria-label="Commute time"
+          className="h-2 w-full cursor-pointer accent-red-600 disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={disabled || loading}
+          max="60"
+          min="5"
+          step="5"
+          type="range"
+          value={minutes}
+          onChange={(event) => setMinutes(Number(event.currentTarget.value))}
+        />
+      </label>
+    </div>
+  );
+}
+
+export function CommuteHeatmapControls({
+  value,
+  onChange,
+  disabled,
+}: ControlProps<CommuteHeatmapState>) {
+  return (
+    <AddressPicker
+      address={value.address}
+      disabled={disabled}
+      onChange={(address) => onChange({ address })}
+    />
+  );
+}

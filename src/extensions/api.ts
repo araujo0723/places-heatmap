@@ -26,6 +26,14 @@ export interface ResolvedRegions {
   itemCount: number;
 }
 
+export interface RegionStyle {
+  fillColor?: string;
+  fillOpacity?: number;
+  lineColor?: string;
+  lineWidth?: number;
+  lineOpacity?: number;
+}
+
 export interface MapViewport {
   center: [number, number];
   bounds: {
@@ -66,6 +74,7 @@ export interface FilterContribution<State = unknown> {
   name: string;
   initialState: State;
   Controls: ComponentType<ControlProps<State>>;
+  regionStyle?: RegionStyle;
   resolvePredicate?: (
     state: State,
     context: ContributionContext,
