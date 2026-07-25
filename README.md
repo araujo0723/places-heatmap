@@ -58,20 +58,20 @@ npm run test:e2e
 
 The app uses the public OpenStreetMap raster endpoint for development. Copy
 `.env.example` to `.env` to select another compatible tile endpoint and
-attribution and configure the nearby-parks cache:
+attribution and configure the nearby-area caches:
 
 ```sh
 REDIS_URL=redis://localhost:6379
 ```
 
-Park lookups fall back to an in-process cache and live Overpass requests when
-Redis is unavailable. `OVERPASS_API_URL` can select another compatible
+Park and water lookups fall back to in-process caches and live Overpass requests
+when Redis is unavailable. `OVERPASS_API_URL` can select another compatible
 interpreter. When `ORS_API_KEY` is set, openrouteservice supplies center-only
 park records if Overpass is temporarily overloaded. Production deployments
 should use map and Overpass services sized for their traffic.
 
 The production build uses Astro's standalone Node adapter. The page shell stays
-prerendered while `/api/parks` runs on the server:
+prerendered while `/api/parks` and `/api/water` run on the server:
 
 ```sh
 npm run build
@@ -148,6 +148,22 @@ between its filter and heatmap.
   park, from 0 to 2,000 m.
 - **Park influence** renders a full-strength park core and twelve geographic
   contour bands fading to zero at 300 m.
+- Views covering more than 25 cache tiles retain stale data and ask the user to
+  zoom in.
+
+## Nearby water
+
+The bundled Nearby water extension queries OpenStreetMap lakes, ponds,
+reservoirs, basins, lagoons, oxbows, cenotes, stream pools, reflecting pools,
+moats, salt ponds, and unclassified enclosed `natural=water` features for the
+Area of Interest plus 5 km. Commonly used `water=fishpond` records are included,
+while explicit linear water types such as rivers, canals, streams, and ditches
+are excluded. Its filter and heatmap share six-hour, zoom-11 tile caches.
+
+- **Water distance** creates a blue bbox-expanded or circular filter region for
+  every body of water, from 0 to 2,000 m.
+- **Water influence** renders a blue, full-strength water core and twelve
+  geographic contour bands fading to zero at 300 m.
 - Views covering more than 25 cache tiles retain stale data and ask the user to
   zoom in.
 

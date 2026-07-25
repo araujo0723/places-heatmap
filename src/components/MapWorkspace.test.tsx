@@ -408,7 +408,7 @@ describe("MapWorkspace", () => {
       .toBeInTheDocument();
   });
 
-  it("exposes the Zillow action and nearby-parks data contributions", async () => {
+  it("exposes the Zillow action and nearby-area data contributions", async () => {
     render(<MapWorkspace />);
 
     expect(await screen.findByText("Centered near you")).toBeInTheDocument();
@@ -426,10 +426,16 @@ describe("MapWorkspace", () => {
       "Nearby parks · Park distance",
     );
     expect(screen.getByLabelText("Filter")).toHaveTextContent(
+      "Nearby water · Water distance",
+    );
+    expect(screen.getByLabelText("Filter")).toHaveTextContent(
       "Commute time · Commute time",
     );
     expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
       "Nearby parks · Park influence",
+    );
+    expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
+      "Nearby water · Water influence",
     );
     expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
       "Commute time · Commute time",

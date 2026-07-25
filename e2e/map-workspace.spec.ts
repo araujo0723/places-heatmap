@@ -63,14 +63,20 @@ test("starts with the bundled data contributions", async ({ page }) => {
   await expect(page.getByRole("button", { name: "RESET" })).toBeDisabled();
   await expect(filterSelector).toBeDisabled();
   await expect(heatmapSelector).toBeDisabled();
-  await expect(filterSelector.locator("option")).toHaveCount(3);
-  await expect(heatmapSelector.locator("option")).toHaveCount(3);
+  await expect(filterSelector.locator("option")).toHaveCount(4);
+  await expect(heatmapSelector.locator("option")).toHaveCount(4);
   await expect(
     filterSelector.locator('option[value="nearby-parks/distance"]'),
   ).toHaveText("Nearby parks · Park distance");
   await expect(
     heatmapSelector.locator('option[value="nearby-parks/influence"]'),
   ).toHaveText("Nearby parks · Park influence");
+  await expect(
+    filterSelector.locator('option[value="nearby-water/distance"]'),
+  ).toHaveText("Nearby water · Water distance");
+  await expect(
+    heatmapSelector.locator('option[value="nearby-water/influence"]'),
+  ).toHaveText("Nearby water · Water influence");
   await expect(
     filterSelector.locator('option[value="commute/time"]'),
   ).toHaveText("Commute time · Commute time");
@@ -155,6 +161,55 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
   await page.getByRole("button", { name: "Remove Park distance" }).click();
   await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
   await page.getByRole("button", { name: "Remove Park influence" }).click();
+});
+
+test("loads nearby water regions and blue influence contours", async ({ page }) => {
+  let waterRequests = 0;
+  await page.route("**/api/water?**", async (route) => {
+    waterRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        tiles: [],
+        waters: [
+          {
+            id: "way/11",
+            name: "Blue Lake",
+            center: [-74.006, 40.7128],
+            bbox: {
+              west: -74.012,
+              south: 40.708,
+              east: -74,
+              north: 40.718,
+            },
+          },
+          {
+            id: "node/12",
+            name: "Small Pond",
+            center: [-73.99, 40.72],
+          },
+        ],
+      }),
+    });
+  });
+  await page.goto("/");
+  await drawArea(page);
+
+  await page
+    .getByLabel("Filter", { exact: true })
+    .selectOption("nearby-water/distance");
+  await expect(
+    page.getByRole("slider", { name: "Water distance" }),
+  ).toBeVisible();
+
+  await page
+    .getByLabel("Heatmap", { exact: true })
+    .selectOption("nearby-water/influence");
+  await expect(page.getByTestId("map-active-summary")).toContainText(
+    "Water influence2",
+  );
+  expect(waterRequests).toBe(1);
 });
 
 test("allows duplicate heatmap instances", async ({ page }) => {
