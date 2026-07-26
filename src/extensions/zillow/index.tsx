@@ -57,11 +57,6 @@ function ZillowControls({ disabled, regions }: ActionControlProps) {
       >
         {loading ? "CREATING ZILLOW REGION…" : "GO TO ZILLOW"}
       </button>
-      {!bounds ? (
-        <p className="mt-2 text-[11px] leading-4 text-slate-500">
-          Define an Area of Interest first.
-        </p>
-      ) : null}
       {error ? (
         <p className="mt-2 text-[11px] leading-4 text-rose-600" role="alert">
           {error}

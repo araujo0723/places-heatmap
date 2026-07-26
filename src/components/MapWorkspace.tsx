@@ -352,7 +352,7 @@ function SectionHeading({
   countTestId,
 }: {
   title: string;
-  count: number;
+  count?: number;
   children?: ReactNode;
   countTestId?: string;
 }) {
@@ -366,12 +366,14 @@ function SectionHeading({
         >
           {title}
         </h2>
-        <span
-          className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500"
-          data-testid={countTestId}
-        >
-          {count}
-        </span>
+        {count !== undefined ? (
+          <span
+            className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-500"
+            data-testid={countTestId}
+          >
+            {count}
+          </span>
+        ) : null}
       </div>
       {children}
     </div>
@@ -453,43 +455,124 @@ function EmptyState({ children }: { children: ReactNode }) {
   );
 }
 
-function AddContribution({
+function ToolbarDropdown({
   label,
+  icon,
   options,
   onAdd,
   disabled = false,
 }: {
   label: string;
+  icon: string;
   options: Array<{ key: string; label: string }>;
   onAdd: (key: string) => void;
   disabled?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!menuRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
   return (
-    <div>
-      <label className="sr-only" htmlFor={`add-${label}`}>
-        {label}
-      </label>
-      <select
-        id={`add-${label}`}
+    <div className="relative" ref={menuRef}>
+      <button
+        aria-expanded={open}
+        aria-haspopup="menu"
         aria-label={label}
-        className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 shadow-sm focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
-        value=""
-        disabled={disabled || options.length === 0}
-        onChange={(event) => {
-          const key = event.currentTarget.value;
-          if (key) onAdd(key);
-        }}
+        className="group relative grid size-11 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-indigo-600 focus:ring-2 focus:ring-indigo-300 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300"
+        disabled={disabled}
+        title={label}
+        type="button"
+        onClick={() => setOpen((current) => !current)}
       >
-        <option value="">
-          {options.length ? `Add ${label.toLowerCase()}…` : "Nothing available"}
-        </option>
-        {options.map((option) => (
-          <option key={option.key} value={option.key}>
-            {option.label}
-          </option>
-        ))}
-      </select>
+        <img alt="" aria-hidden="true" className="size-5" src={icon} />
+        <span className="pointer-events-none absolute top-full left-1/2 z-30 mt-2 -translate-x-1/2 rounded-md bg-slate-950 px-2 py-1 text-[10px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+          {label}
+        </span>
+      </button>
+      {open ? (
+        <div
+          aria-label={`${label} options`}
+          className="absolute top-full left-0 z-20 mt-2 min-w-64 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl shadow-slate-900/15"
+          role="menu"
+        >
+          {options.length ? (
+            options.map((option) => (
+              <button
+                className="block w-full rounded-lg px-3 py-2 text-left text-xs font-medium text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 focus:bg-indigo-50 focus:text-indigo-700 focus:outline-none"
+                key={option.key}
+                role="menuitem"
+                type="button"
+                onClick={() => {
+                  onAdd(option.key);
+                  setOpen(false);
+                }}
+              >
+                {option.label}
+              </button>
+            ))
+          ) : (
+            <p className="px-3 py-2 text-xs text-slate-400">
+              Nothing available
+            </p>
+          )}
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+function ToolbarButton({
+  label,
+  icon,
+  active = false,
+  disabled = false,
+  onClick,
+}: {
+  label: string;
+  icon: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      aria-label={label}
+      aria-pressed={active}
+      className={`group relative grid size-11 place-items-center rounded-lg border shadow-sm transition focus:ring-2 focus:ring-indigo-300 focus:outline-none disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300 ${
+        active
+          ? "border-indigo-600 bg-indigo-600 text-white"
+          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-indigo-600"
+      }`}
+      disabled={disabled}
+      title={label}
+      type="button"
+      onClick={onClick}
+    >
+      <img
+        alt=""
+        aria-hidden="true"
+        className={`size-5 ${active ? "brightness-0 invert" : ""}`}
+        src={icon}
+      />
+      <span className="pointer-events-none absolute top-full left-1/2 z-30 mt-2 -translate-x-1/2 rounded-md bg-slate-950 px-2 py-1 text-[10px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+        {label}
+      </span>
+    </button>
   );
 }
 
@@ -515,7 +598,9 @@ export default function MapWorkspace() {
   >(lastLocationRef.current ? "cached" : "locating");
   const [drawMode, setDrawMode] = useState<"select" | "rectangle">("select");
   const [areaOfInterest, setAreaOfInterest] = useState<Feature<Polygon>>();
-  const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
+  const [clearConfirmation, setClearConfirmation] = useState<
+    "filters" | "heatmaps"
+  >();
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
   const [enabledFilterIds, setEnabledFilterIds] = useState<Set<string>>(
     () => new Set(),
@@ -1479,24 +1564,16 @@ export default function MapWorkspace() {
           "Z",
         ].join(" ")
       : undefined;
-  const resetWorkspace = () => {
-    resettingDrawRef.current = true;
-    lastValidAreaRef.current = undefined;
-    drawRef.current?.clear();
-    resettingDrawRef.current = false;
-    activeDrawPointerRef.current = undefined;
-    drawDraftRef.current = [];
-    setDrawDraft([]);
-    setDrawMode("select");
-    drawRef.current?.setMode("select");
-    setAreaOfInterest(undefined);
+  const clearFilters = () => {
     setActiveFilters([]);
     setEnabledFilterIds(new Set());
-    setActiveHeatmaps([]);
     setFilterRuntime({});
+    setClearConfirmation(undefined);
+  };
+  const clearHeatmaps = () => {
+    setActiveHeatmaps([]);
     setHeatmapRuntime({});
-    setDrawError(undefined);
-    setResetConfirmationOpen(false);
+    setClearConfirmation(undefined);
   };
 
   return (
@@ -1537,82 +1614,48 @@ export default function MapWorkspace() {
       ) : null}
 
       <aside className="absolute top-4 bottom-4 left-4 z-10 flex w-96 flex-col overflow-hidden rounded-2xl border border-white/70 bg-white/95 shadow-2xl shadow-slate-900/20 backdrop-blur">
+        <header className="flex shrink-0 items-center gap-2 border-b border-slate-200/80 px-5 py-4">
+          <ToolbarButton
+            label={
+              areaOfInterest
+                ? "Redefine Area of Interest"
+                : "Define Area of Interest"
+            }
+            icon="/icons/area-of-interest.svg"
+            active={drawMode === "rectangle"}
+            disabled={!mapReady}
+            onClick={startDrawing}
+          />
+          <ToolbarDropdown
+            label="Add Filter"
+            icon="/icons/filter-add.svg"
+            options={extensionRegistry.filters.map((entry) => ({
+              key: entry.key,
+              label: `${entry.extension.name} · ${entry.contribution.name}`,
+            }))}
+            onAdd={addFilter}
+            disabled={!mapReady || !areaOfInterest}
+          />
+          <ToolbarDropdown
+            label="Add Heatmap"
+            icon="/icons/heatmap-add.svg"
+            options={extensionRegistry.heatmaps.map((entry) => ({
+              key: entry.key,
+              label: `${entry.extension.name} · ${entry.contribution.name}`,
+            }))}
+            onAdd={addHeatmap}
+            disabled={!mapReady || !areaOfInterest}
+          />
+          <span className="sr-only" data-testid="area-of-interest-count">
+            {areaOfInterest ? 1 : 0}
+          </span>
+        </header>
+
         <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
-          <button
-            className="w-full rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-bold tracking-wide text-rose-700 hover:bg-rose-50 focus:ring-2 focus:ring-rose-300 focus:outline-none disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-300 disabled:hover:bg-white"
-            type="button"
-            disabled={!areaOfInterest}
-            onClick={() => setResetConfirmationOpen(true)}
-          >
-            RESET WORKSPACE
-          </button>
-
-          <section
-            className="space-y-3"
-            aria-labelledby="area-of-interest-heading"
-          >
-            <SectionHeading
-              title="Area of interest"
-              count={areaOfInterest ? 1 : 0}
-              countTestId="area-of-interest-count"
-            />
-            {!areaOfInterest ? (
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                <button
-                  className={`w-full rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-indigo-300 focus:outline-none ${
-                    drawMode === "rectangle"
-                      ? "bg-indigo-600 text-white shadow-sm"
-                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
-                  type="button"
-                  disabled={!mapReady}
-                  aria-pressed={drawMode === "rectangle"}
-                  onClick={startDrawing}
-                >
-                  Draw area
-                </button>
-                {drawMode === "rectangle" ? (
-                  <p className="mt-3 text-[11px] leading-4 text-slate-500">
-                    Press and drag between opposite corners of a rectangle no
-                    more than {MAX_AREA_OF_INTEREST_DIMENSION_MILES} miles
-                    across. Map panning is paused.
-                  </p>
-                ) : null}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
-                <button
-                  className={`w-full rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-indigo-300 focus:outline-none ${
-                    drawMode === "rectangle"
-                      ? "bg-indigo-600 text-white shadow-sm"
-                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                  }`}
-                  type="button"
-                  disabled={!mapReady}
-                  aria-pressed={drawMode === "rectangle"}
-                  onClick={startDrawing}
-                >
-                  Redefine area
-                </button>
-                {drawMode === "rectangle" ? (
-                  <p className="mt-3 text-[11px] leading-4 text-slate-500">
-                    Draw a replacement rectangle no more than{" "}
-                    {MAX_AREA_OF_INTEREST_DIMENSION_MILES} miles across.
-                    Existing filters and heatmaps stay active until the new
-                    area is valid.
-                  </p>
-                ) : null}
-              </div>
-            )}
-          </section>
-
           {extensionRegistry.actions.length > 0 ? (
             <section className="space-y-3" aria-labelledby="actions-heading">
-              <SectionHeading
-                title="Actions"
-                count={extensionRegistry.actions.length}
-              />
-              <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+              <SectionHeading title="Actions" />
+              <div className="space-y-2">
                 {extensionRegistry.actions.map((entry) => {
                   const Controls = entry.contribution.Controls;
                   return (
@@ -1629,16 +1672,23 @@ export default function MapWorkspace() {
           ) : null}
 
           <section className="space-y-3" aria-labelledby="filters-heading">
-            <SectionHeading title="Filters" count={activeFilters.length} />
-            <AddContribution
-              label="Filter"
-              options={extensionRegistry.filters.map((entry) => ({
-                key: entry.key,
-                label: `${entry.extension.name} · ${entry.contribution.name}`,
-              }))}
-              onAdd={addFilter}
-              disabled={!mapReady || !areaOfInterest}
-            />
+            <SectionHeading title="Filters" count={activeFilters.length}>
+              <button
+                aria-label="Clear all filters"
+                className="grid size-7 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 focus:ring-2 focus:ring-rose-300 focus:outline-none disabled:cursor-not-allowed disabled:text-slate-200 disabled:hover:bg-transparent"
+                disabled={activeFilters.length === 0}
+                title="Clear all filters"
+                type="button"
+                onClick={() => setClearConfirmation("filters")}
+              >
+                <img
+                  alt=""
+                  aria-hidden="true"
+                  className="size-4"
+                  src="/icons/trash.svg"
+                />
+              </button>
+            </SectionHeading>
             {activeFilters.length === 0 ? (
               <EmptyState>No active filters</EmptyState>
             ) : (
@@ -1750,16 +1800,23 @@ export default function MapWorkspace() {
           </section>
 
           <section className="space-y-3" aria-labelledby="heatmaps-heading">
-            <SectionHeading title="Heatmaps" count={activeHeatmaps.length} />
-            <AddContribution
-              label="Heatmap"
-              options={extensionRegistry.heatmaps.map((entry) => ({
-                key: entry.key,
-                label: `${entry.extension.name} · ${entry.contribution.name}`,
-              }))}
-              onAdd={addHeatmap}
-              disabled={!mapReady || !areaOfInterest}
-            />
+            <SectionHeading title="Heatmaps" count={activeHeatmaps.length}>
+              <button
+                aria-label="Clear all heatmaps"
+                className="grid size-7 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 focus:ring-2 focus:ring-rose-300 focus:outline-none disabled:cursor-not-allowed disabled:text-slate-200 disabled:hover:bg-transparent"
+                disabled={activeHeatmaps.length === 0}
+                title="Clear all heatmaps"
+                type="button"
+                onClick={() => setClearConfirmation("heatmaps")}
+              >
+                <img
+                  alt=""
+                  aria-hidden="true"
+                  className="size-4"
+                  src="/icons/trash.svg"
+                />
+              </button>
+            </SectionHeading>
             {activeHeatmaps.length === 0 ? (
               <EmptyState>No active heatmaps</EmptyState>
             ) : (
@@ -1847,50 +1904,56 @@ export default function MapWorkspace() {
         </div>
       </aside>
 
-      {resetConfirmationOpen ? (
+      {clearConfirmation ? (
         <div
           className="absolute inset-0 z-30 grid place-items-center bg-slate-950/45 p-6 backdrop-blur-sm"
           role="presentation"
           onPointerDown={(event) => {
             if (event.target === event.currentTarget) {
-              setResetConfirmationOpen(false);
+              setClearConfirmation(undefined);
             }
           }}
         >
           <div
-            aria-describedby="reset-workspace-description"
-            aria-labelledby="reset-workspace-title"
+            aria-describedby="clear-contributions-description"
+            aria-labelledby="clear-contributions-title"
             aria-modal="true"
             className="w-full max-w-md rounded-2xl border border-white/80 bg-white p-5 shadow-2xl"
             role="dialog"
           >
             <h2
-              id="reset-workspace-title"
+              id="clear-contributions-title"
               className="text-base font-bold text-slate-900"
             >
-              Reset the workspace?
+              Clear all {clearConfirmation}?
             </h2>
             <p
-              id="reset-workspace-description"
+              id="clear-contributions-description"
               className="mt-2 text-sm leading-5 text-slate-600"
             >
-              This removes the Area of Interest and all configured filters and
-              heatmaps from the map.
+              This removes every configured {clearConfirmation} item from the
+              map. Your Area of Interest and{" "}
+              {clearConfirmation === "filters" ? "heatmaps" : "filters"} will
+              stay in place.
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-slate-300 focus:outline-none"
                 type="button"
-                onClick={() => setResetConfirmationOpen(false)}
+                onClick={() => setClearConfirmation(undefined)}
               >
                 Cancel
               </button>
               <button
                 className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 focus:ring-2 focus:ring-rose-300 focus:outline-none"
                 type="button"
-                onClick={resetWorkspace}
+                onClick={
+                  clearConfirmation === "filters"
+                    ? clearFilters
+                    : clearHeatmaps
+                }
               >
-                Reset everything
+                Clear {clearConfirmation}
               </button>
             </div>
           </div>

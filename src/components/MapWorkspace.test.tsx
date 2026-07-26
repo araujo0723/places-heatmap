@@ -213,7 +213,7 @@ import { clearNearbyWaterCache } from "../extensions/nearby-water/data";
 
 async function drawArea(user: ReturnType<typeof userEvent.setup>) {
   await user.click(
-    await screen.findByRole("button", { name: "Draw area" }),
+    await screen.findByRole("button", { name: "Define Area of Interest" }),
   );
   const overlay = screen.getByTestId("draw-overlay");
   Object.defineProperties(overlay, {
@@ -254,6 +254,26 @@ async function drawArea(user: ReturnType<typeof userEvent.setup>) {
   });
   await waitFor(() =>
     expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1"),
+  );
+}
+
+const contributionLabels: Record<string, string> = {
+  "nearby-parks/distance": "Nearby parks · Park distance",
+  "nearby-water/distance": "Nearby water · Water distance",
+  "commute/time": "Commute time · Commute time",
+  "nearby-parks/influence": "Nearby parks · Park influence",
+  "nearby-water/influence": "Nearby water · Water influence",
+  "commute/travel-time": "Commute time · Commute time",
+};
+
+async function addContribution(
+  user: ReturnType<typeof userEvent.setup>,
+  type: "Filter" | "Heatmap",
+  key: string,
+) {
+  await user.click(screen.getByRole("button", { name: `Add ${type}` }));
+  await user.click(
+    screen.getByRole("menuitem", { name: contributionLabels[key] }),
   );
 }
 
@@ -300,7 +320,7 @@ describe("MapWorkspace", () => {
       render(<MapWorkspace />);
 
       await user.click(
-        await screen.findByRole("button", { name: "Draw area" }),
+        await screen.findByRole("button", { name: "Define Area of Interest" }),
       );
       const overlay = screen.getByTestId("draw-overlay");
       Object.defineProperties(overlay, {
@@ -358,7 +378,7 @@ describe("MapWorkspace", () => {
         "0",
       );
       expect(
-        screen.getByRole("button", { name: "Draw area" }),
+        screen.getByRole("button", { name: "Define Area of Interest" }),
       ).toHaveAttribute("aria-pressed", "true");
     },
   );
@@ -397,7 +417,7 @@ describe("MapWorkspace", () => {
     render(<MapWorkspace />);
 
     await user.click(
-      await screen.findByRole("button", { name: "Draw area" }),
+      await screen.findByRole("button", { name: "Define Area of Interest" }),
     );
     const overlay = screen.getByTestId("draw-overlay");
     Object.defineProperties(overlay, {
@@ -441,7 +461,7 @@ describe("MapWorkspace", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "It cannot be more than 50 miles.",
     );
-    expect(screen.getByRole("button", { name: "Draw area" }))
+    expect(screen.getByRole("button", { name: "Define Area of Interest" }))
       .toBeInTheDocument();
   });
 
@@ -452,37 +472,27 @@ describe("MapWorkspace", () => {
     expect(
       screen.getByRole("button", { name: "GO TO ZILLOW" }),
     ).toBeDisabled();
-    expect(screen.getByText("Define an Area of Interest first."))
-      .toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "RESET WORKSPACE" }),
+      screen.getByRole("button", { name: "Define Area of Interest" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Add Filter" }),
     ).toBeDisabled();
-    expect(screen.getByLabelText("Filter")).toBeDisabled();
-    expect(screen.getByLabelText("Heatmap")).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Add Heatmap" }),
+    ).toBeDisabled();
     expect(screen.getByText("No active filters")).toBeInTheDocument();
     expect(screen.getByText("No active heatmaps")).toBeInTheDocument();
-    expect(screen.getByLabelText("Filter")).toHaveTextContent(
-      "Nearby parks · Park distance",
-    );
-    expect(screen.getByLabelText("Filter")).toHaveTextContent(
-      "Nearby water · Water distance",
-    );
-    expect(screen.getByLabelText("Filter")).toHaveTextContent(
-      "Commute time · Commute time",
-    );
-    expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
-      "Nearby parks · Park influence",
-    );
-    expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
-      "Nearby water · Water influence",
-    );
-    expect(screen.getByLabelText("Heatmap")).toHaveTextContent(
-      "Commute time · Commute time",
-    );
+    expect(
+      screen.queryByRole("heading", { name: "Area of interest" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Define an Area of Interest first."),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/demo-places/i)).not.toBeInTheDocument();
   });
 
-  it("requires confirmation before resetting the full workspace", async () => {
+  it("confirms and scopes clear-all actions by contribution type", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => Response.json({ tiles: [], parks: [] })),
@@ -491,41 +501,36 @@ describe("MapWorkspace", () => {
     render(<MapWorkspace />);
 
     await drawArea(user);
-    await user.selectOptions(
-      screen.getByLabelText("Filter"),
-      "nearby-parks/distance",
-    );
-    await user.selectOptions(
-      screen.getByLabelText("Heatmap"),
-      "nearby-parks/influence",
-    );
+    await addContribution(user, "Filter", "nearby-parks/distance");
+    await addContribution(user, "Heatmap", "nearby-parks/influence");
 
-    const resetButton = screen.getByRole("button", {
-      name: "RESET WORKSPACE",
+    const clearFiltersButton = screen.getByRole("button", {
+      name: "Clear all filters",
     });
-    expect(resetButton).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "Draw area" }))
-      .not.toBeInTheDocument();
-
-    await user.click(resetButton);
+    await user.click(clearFiltersButton);
     expect(
-      screen.getByRole("dialog", { name: "Reset the workspace?" }),
+      screen.getByRole("dialog", { name: "Clear all filters?" }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1");
 
-    await user.click(resetButton);
-    await user.click(
-      screen.getByRole("button", { name: "Reset everything" }),
-    );
+    await user.click(clearFiltersButton);
+    await user.click(screen.getByRole("button", { name: "Clear filters" }));
 
-    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("0");
-    expect(screen.getByRole("button", { name: "Draw area" })).toBeEnabled();
-    expect(screen.getByLabelText("Filter")).toBeDisabled();
-    expect(screen.getByLabelText("Heatmap")).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Redefine Area of Interest" }),
+    ).toBeEnabled();
     expect(screen.getByText("No active filters")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove Park influence" }),
+    ).toBeInTheDocument();
+    expect(clearFiltersButton).toBeDisabled();
+
+    await user.click(
+      screen.getByRole("button", { name: "Clear all heatmaps" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Clear heatmaps" }));
     expect(screen.getByText("No active heatmaps")).toBeInTheDocument();
-    expect(resetButton).toBeDisabled();
   });
 
   it("keeps the current area active until a redefined area is valid", async () => {
@@ -543,10 +548,7 @@ describe("MapWorkspace", () => {
       }
     ).lastInstance.setCenter([-0.115, 51.512]);
     await drawArea(user);
-    await user.selectOptions(
-      screen.getByLabelText("Filter"),
-      "nearby-parks/distance",
-    );
+    await addContribution(user, "Filter", "nearby-parks/distance");
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     await waitFor(() =>
       expect(screen.queryByText("Loading")).not.toBeInTheDocument(),
@@ -561,7 +563,9 @@ describe("MapWorkspace", () => {
     ).lastInstance;
     map.setCenter([1, 52]);
 
-    await user.click(screen.getByRole("button", { name: "Redefine area" }));
+    await user.click(
+      screen.getByRole("button", { name: "Redefine Area of Interest" }),
+    );
     const overlay = screen.getByTestId("draw-overlay");
     Object.defineProperties(overlay, {
       getBoundingClientRect: {
@@ -608,7 +612,7 @@ describe("MapWorkspace", () => {
       expect(fetchMock.mock.calls.length).toBeGreaterThan(requestCount),
     );
     expect(
-      screen.getByRole("button", { name: "Redefine area" }),
+      screen.getByRole("button", { name: "Redefine Area of Interest" }),
     ).toHaveAttribute("aria-pressed", "false");
   });
 
@@ -687,7 +691,6 @@ describe("MapWorkspace", () => {
       }
     ).lastInstance.setCenter([-0.115, 51.512]);
     await drawArea(user);
-    const filterSelector = await screen.findByLabelText("Filter");
     const map = (
       MapLibreMap as unknown as {
         lastInstance: {
@@ -701,10 +704,7 @@ describe("MapWorkspace", () => {
     ).lastInstance;
     map.setStyleLoaded(false);
 
-    await user.selectOptions(
-      filterSelector,
-      "nearby-parks/distance",
-    );
+    await addContribution(user, "Filter", "nearby-parks/distance");
     await waitFor(() =>
       expect(
         map.getSource("filter-owned-regions-source")?.data.features,
@@ -737,10 +737,7 @@ describe("MapWorkspace", () => {
       { timeout: 2_000 },
     );
 
-    await user.selectOptions(
-      screen.getByLabelText("Heatmap"),
-      "nearby-parks/influence",
-    );
+    await addContribution(user, "Heatmap", "nearby-parks/influence");
     await waitFor(
       () =>
         expect(screen.getByTestId("map-active-summary")).toHaveTextContent(
@@ -804,10 +801,7 @@ describe("MapWorkspace", () => {
 
     await screen.findByText("Centered near you");
     await drawArea(user);
-    await user.selectOptions(
-      screen.getByLabelText("Filter"),
-      "nearby-parks/distance",
-    );
+    await addContribution(user, "Filter", "nearby-parks/distance");
 
     expect(await screen.findByText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
@@ -879,10 +873,7 @@ describe("MapWorkspace", () => {
       }
     ).lastInstance.setCenter([-0.115, 51.512]);
     await drawArea(user);
-    await user.selectOptions(
-      screen.getByLabelText("Filter"),
-      "nearby-parks/distance",
-    );
+    await addContribution(user, "Filter", "nearby-parks/distance");
 
     const map = (
       MapLibreMap as unknown as {
@@ -973,14 +964,8 @@ describe("MapWorkspace", () => {
 
     await screen.findByText("Centered near you");
     await drawArea(user);
-    await user.selectOptions(
-      screen.getByLabelText("Filter"),
-      "nearby-parks/distance",
-    );
-    await user.selectOptions(
-      screen.getByLabelText("Filter"),
-      "nearby-water/distance",
-    );
+    await addContribution(user, "Filter", "nearby-parks/distance");
+    await addContribution(user, "Filter", "nearby-water/distance");
 
     const map = (
       MapLibreMap as unknown as {
@@ -1016,9 +1001,8 @@ describe("MapWorkspace", () => {
     render(<MapWorkspace />);
 
     await drawArea(user);
-    const selector = await screen.findByLabelText("Heatmap");
-    await user.selectOptions(selector, "nearby-parks/influence");
-    await user.selectOptions(selector, "nearby-parks/influence");
+    await addContribution(user, "Heatmap", "nearby-parks/influence");
+    await addContribution(user, "Heatmap", "nearby-parks/influence");
 
     await waitFor(() =>
       expect(
@@ -1084,10 +1068,7 @@ describe("MapWorkspace", () => {
       }
     ).lastInstance.setCenter([-84.35, 33.75]);
     await drawArea(user);
-    await user.selectOptions(
-      await screen.findByLabelText("Filter"),
-      "commute/time",
-    );
+    await addContribution(user, "Filter", "commute/time");
     const addressInput = screen.getByRole("textbox", {
       name: "Commute address",
     });
@@ -1188,10 +1169,7 @@ describe("MapWorkspace", () => {
     render(<MapWorkspace />);
 
     await drawArea(user);
-    await user.selectOptions(
-      await screen.findByLabelText("Heatmap"),
-      "commute/travel-time",
-    );
+    await addContribution(user, "Heatmap", "commute/travel-time");
 
     expect(
       screen.getByRole("textbox", { name: "Commute address" }),

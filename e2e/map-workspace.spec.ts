@@ -16,7 +16,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function drawArea(page: Page) {
-  const drawButton = page.getByRole("button", { name: "Draw area" });
+  const drawButton = page.getByRole("button", {
+    name: "Define Area of Interest",
+    exact: true,
+  });
   await expect(drawButton).toBeEnabled({ timeout: 15_000 });
   await drawButton.click();
 
@@ -40,6 +43,24 @@ async function drawArea(page: Page) {
   return box;
 }
 
+const contributionLabels: Record<string, string> = {
+  "nearby-parks/distance": "Nearby parks · Park distance",
+  "nearby-water/distance": "Nearby water · Water distance",
+  "nearby-parks/influence": "Nearby parks · Park influence",
+  "nearby-water/influence": "Nearby water · Water influence",
+};
+
+async function addContribution(
+  page: Page,
+  type: "Filter" | "Heatmap",
+  key: string,
+) {
+  await page.getByRole("button", { name: `Add ${type}` }).click();
+  await page
+    .getByRole("menuitem", { name: contributionLabels[key] })
+    .click();
+}
+
 test("starts with the bundled data contributions", async ({ page }) => {
   await page.goto("/");
 
@@ -54,36 +75,24 @@ test("starts with the bundled data contributions", async ({ page }) => {
   await expect(page.getByRole("button", { name: "GO TO ZILLOW" })).toBeDisabled();
   await expect(page.getByText("Places workspace")).toHaveCount(0);
   await expect(page.getByText("Explore the map")).toHaveCount(0);
-  const filterSelector = page.getByLabel("Filter", { exact: true });
-  const heatmapSelector = page.getByLabel("Heatmap", { exact: true });
-  await expect(page.getByRole("heading", { name: "Area of interest" }))
-    .toBeVisible();
-  await expect(page.getByRole("button", { name: "Draw area" })).toBeEnabled();
   await expect(
-    page.getByRole("button", { name: "RESET WORKSPACE" }),
+    page.getByRole("button", { name: "Define Area of Interest" }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "Add Filter" }),
   ).toBeDisabled();
-  await expect(filterSelector).toBeDisabled();
-  await expect(heatmapSelector).toBeDisabled();
-  await expect(filterSelector.locator("option")).toHaveCount(4);
-  await expect(heatmapSelector.locator("option")).toHaveCount(4);
   await expect(
-    filterSelector.locator('option[value="nearby-parks/distance"]'),
-  ).toHaveText("Nearby parks · Park distance");
+    page.getByRole("button", { name: "Add Heatmap" }),
+  ).toBeDisabled();
   await expect(
-    heatmapSelector.locator('option[value="nearby-parks/influence"]'),
-  ).toHaveText("Nearby parks · Park influence");
+    page.getByRole("heading", { name: "Area of interest" }),
+  ).toHaveCount(0);
   await expect(
-    filterSelector.locator('option[value="nearby-water/distance"]'),
-  ).toHaveText("Nearby water · Water distance");
+    page.getByRole("button", { name: "Clear all filters" }),
+  ).toBeDisabled();
   await expect(
-    heatmapSelector.locator('option[value="nearby-water/influence"]'),
-  ).toHaveText("Nearby water · Water influence");
-  await expect(
-    filterSelector.locator('option[value="commute/time"]'),
-  ).toHaveText("Commute time · Commute time");
-  await expect(
-    heatmapSelector.locator('option[value="commute/travel-time"]'),
-  ).toHaveText("Commute time · Commute time");
+    page.getByRole("button", { name: "Clear all heatmaps" }),
+  ).toBeDisabled();
   await expect
     .poll(() =>
       page.evaluate(() =>
@@ -128,9 +137,7 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
   await page.goto("/");
   await drawArea(page);
 
-  await page
-    .getByLabel("Filter", { exact: true })
-    .selectOption("nearby-parks/distance");
+  await addContribution(page, "Filter", "nearby-parks/distance");
   await expect(
     page.getByRole("slider", { name: "Park distance" }),
   ).toBeEnabled();
@@ -139,9 +146,7 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
 
   await page.getByRole("slider", { name: "Park distance" }).fill("0");
 
-  await page
-    .getByLabel("Heatmap", { exact: true })
-    .selectOption("nearby-parks/influence");
+  await addContribution(page, "Heatmap", "nearby-parks/influence");
   await expect(page.getByTestId("map-active-summary")).toContainText(
     "Park influence2",
   );
@@ -201,16 +206,12 @@ test("loads nearby water regions and blue influence contours", async ({ page }) 
   await page.goto("/");
   await drawArea(page);
 
-  await page
-    .getByLabel("Filter", { exact: true })
-    .selectOption("nearby-water/distance");
+  await addContribution(page, "Filter", "nearby-water/distance");
   await expect(
     page.getByRole("slider", { name: "Water distance" }),
   ).toBeVisible();
 
-  await page
-    .getByLabel("Heatmap", { exact: true })
-    .selectOption("nearby-water/influence");
+  await addContribution(page, "Heatmap", "nearby-water/influence");
   await expect(page.getByTestId("map-active-summary")).toContainText(
     "Water influence2",
   );
@@ -228,9 +229,8 @@ test("allows duplicate heatmap instances", async ({ page }) => {
   await page.goto("/");
   await drawArea(page);
 
-  const heatmapSelector = page.getByLabel("Heatmap", { exact: true });
-  await heatmapSelector.selectOption("nearby-parks/influence");
-  await heatmapSelector.selectOption("nearby-parks/influence");
+  await addContribution(page, "Heatmap", "nearby-parks/influence");
+  await addContribution(page, "Heatmap", "nearby-parks/influence");
 
   const removeButtons = page.getByRole("button", {
     name: "Remove Park influence",
@@ -244,10 +244,13 @@ test("allows duplicate heatmap instances", async ({ page }) => {
   await expect(removeButtons).toHaveCount(1);
 });
 
-test("draws one Area of Interest and resets the workspace with confirmation", async ({ page }) => {
+test("draws one Area of Interest and changes the toolbar action", async ({ page }) => {
   await page.goto("/");
 
-  const drawButton = page.getByRole("button", { name: "Draw area" });
+  const drawButton = page.getByRole("button", {
+    name: "Define Area of Interest",
+    exact: true,
+  });
   await expect(drawButton).toBeEnabled({ timeout: 15_000 });
   await drawButton.click();
   await expect(drawButton).toHaveAttribute("aria-pressed", "true");
@@ -277,10 +280,7 @@ test("draws one Area of Interest and resets the workspace with confirmation", as
   await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
   await expect(drawButton).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "RESET WORKSPACE" }),
-  ).toBeEnabled();
-  await expect(
-    page.getByRole("button", { name: "Redefine area" }),
+    page.getByRole("button", { name: "Redefine Area of Interest" }),
   ).toBeEnabled();
   await page.addStyleTag({
     content:
@@ -296,11 +296,4 @@ test("draws one Area of Interest and resets the workspace with confirmation", as
     },
     maxDiffPixelRatio: 0.01,
   });
-  await page.getByRole("button", { name: "RESET WORKSPACE" }).click();
-  await expect(
-    page.getByRole("dialog", { name: "Reset the workspace?" }),
-  ).toBeVisible();
-  await page.getByRole("button", { name: "Reset everything" }).click();
-  await expect(page.getByTestId("area-of-interest-count")).toHaveText("0");
-  await expect(page.getByRole("button", { name: "Draw area" })).toBeEnabled();
 });
