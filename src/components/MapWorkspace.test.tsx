@@ -209,6 +209,7 @@ vi.mock("terra-draw", () => {
 import MapWorkspace from "./MapWorkspace";
 import { Map as MapLibreMap } from "maplibre-gl";
 import { clearNearbyParkCache } from "../extensions/nearby-parks/data";
+import { clearNearbyWaterCache } from "../extensions/nearby-water/data";
 
 async function drawArea(user: ReturnType<typeof userEvent.setup>) {
   await user.click(
@@ -260,6 +261,7 @@ describe("MapWorkspace", () => {
   beforeEach(() => {
     localStorage.clear();
     clearNearbyParkCache();
+    clearNearbyWaterCache();
   });
 
   afterEach(() => {
@@ -703,8 +705,12 @@ describe("MapWorkspace", () => {
     await waitFor(() =>
       expect(
         map.getSource("filter-owned-regions-source")?.data.features,
-      ).toHaveLength(2),
+      ).toHaveLength(1),
     );
+    expect(
+      map.getSource("filter-owned-regions-source")?.data.features[0].geometry
+        .type,
+    ).toBe("MultiPolygon");
 
     const parkDistanceSlider = screen.getByRole("slider", {
       name: "Park distance",
@@ -714,15 +720,17 @@ describe("MapWorkspace", () => {
     expect(screen.getByText("0 m")).toBeInTheDocument();
     await new Promise((resolve) => window.setTimeout(resolve, 300));
     expect(
-      map.getSource("filter-owned-regions-source")?.data.features,
-    ).toHaveLength(2);
+      map.getSource("filter-owned-regions-source")?.data.features[0].geometry
+        .type,
+    ).toBe("MultiPolygon");
 
     fireEvent.pointerUp(parkDistanceSlider);
     await waitFor(
       () =>
         expect(
-          map.getSource("filter-owned-regions-source")?.data.features,
-        ).toHaveLength(1),
+          map.getSource("filter-owned-regions-source")?.data.features[0]
+            .geometry.type,
+        ).toBe("Polygon"),
       { timeout: 2_000 },
     );
 
@@ -777,6 +785,82 @@ describe("MapWorkspace", () => {
     map.emit("moveend");
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("draws only the common boundary of park and water filters", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).startsWith("/api/parks?")) {
+          return Response.json({
+            tiles: [],
+            parks: [
+              {
+                id: "way/park",
+                center: [-73.98, 40.75],
+                bbox: {
+                  west: -73.985,
+                  south: 40.74,
+                  east: -73.975,
+                  north: 40.76,
+                },
+              },
+            ],
+          });
+        }
+        return Response.json({
+          tiles: [],
+          waters: [
+            {
+              id: "way/water",
+              center: [-73.975, 40.75],
+              bbox: {
+                west: -73.98,
+                south: 40.745,
+                east: -73.97,
+                north: 40.755,
+              },
+            },
+          ],
+        });
+      }),
+    );
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await screen.findByText("Centered near you");
+    await drawArea(user);
+    await user.selectOptions(
+      screen.getByLabelText("Filter"),
+      "nearby-parks/distance",
+    );
+    await screen.findByText("Active");
+    await user.selectOptions(
+      screen.getByLabelText("Filter"),
+      "nearby-water/distance",
+    );
+    await waitFor(() =>
+      expect(screen.getAllByText("Active")).toHaveLength(2),
+    );
+
+    const map = (
+      MapLibreMap as unknown as {
+        lastInstance: {
+          getSource(id: string): { data: FeatureCollection } | undefined;
+        };
+      }
+    ).lastInstance;
+    await waitFor(() =>
+      expect(
+        map.getSource("filter-owned-regions-source")?.data.features,
+      ).toHaveLength(1),
+    );
+    expect(
+      map.getSource("filter-owned-regions-source")?.data.features[0].properties,
+    ).toMatchObject({
+      __hostFillColor: "#2563eb",
+      __hostLineColor: "#1d4ed8",
+    });
   });
 
   it("allows duplicate park heatmap instances", async () => {

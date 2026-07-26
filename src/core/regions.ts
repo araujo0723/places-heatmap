@@ -1,3 +1,4 @@
+import area from "@turf/area";
 import intersect from "@turf/intersect";
 import union from "@turf/union";
 import { featureCollection } from "@turf/helpers";
@@ -10,6 +11,7 @@ import type {
 } from "../extensions/api";
 
 export const DEFAULT_REGION_SIMPLIFY_THRESHOLD = 100;
+export const MINIMUM_RESULT_REGION_AREA_SQUARE_METERS = 100_000;
 export const MAX_AREA_OF_INTEREST_DIMENSION_MILES = 50;
 const EARTH_RADIUS_MILES = 3_958.7613;
 
@@ -107,23 +109,61 @@ export function unionRegions(
   return union(featureCollection([...regions])) as RegionFeature | undefined;
 }
 
+export function filterRegionComponentsByArea(
+  region: RegionFeature,
+  minimumAreaSquareMeters = MINIMUM_RESULT_REGION_AREA_SQUARE_METERS,
+): RegionFeature | undefined {
+  if (minimumAreaSquareMeters <= 0) return region;
+
+  const polygons =
+    region.geometry.type === "Polygon"
+      ? [region.geometry.coordinates]
+      : region.geometry.coordinates;
+  const retained = polygons.filter(
+    (coordinates) =>
+      area({
+        type: "Feature",
+        properties: {},
+        geometry: { type: "Polygon", coordinates },
+      }) > minimumAreaSquareMeters,
+  );
+
+  if (retained.length === 0) return undefined;
+  return {
+    ...region,
+    geometry:
+      retained.length === 1
+        ? { type: "Polygon", coordinates: retained[0] }
+        : { type: "MultiPolygon", coordinates: retained },
+  };
+}
+
 export function intersectRegionGroups(
   groups: ReadonlyArray<ReadonlyArray<RegionFeature>>,
+  minimumAreaSquareMeters = MINIMUM_RESULT_REGION_AREA_SQUARE_METERS,
 ): RegionFeature | undefined {
-  const masks = groups
-    .filter((regions) => regions.length > 0)
-    .map((regions) => unionRegions(regions))
-    .filter((region): region is RegionFeature => !!region);
+  if (groups.length === 0) return undefined;
+  const masks: RegionFeature[] = [];
+  for (const regions of groups) {
+    const mask = unionRegions(regions);
+    if (!mask) return undefined;
+    masks.push(mask);
+  }
 
-  if (masks.length === 0) return undefined;
+  const intersection = masks
+    .slice(1)
+    .reduce<RegionFeature | undefined>((result, mask) => {
+      if (!result) return undefined;
+      return (
+        (intersect(
+          featureCollection([result, mask]),
+        ) as RegionFeature | null) ?? undefined
+      );
+    }, masks[0]);
 
-  return masks.slice(1).reduce<RegionFeature | undefined>((result, mask) => {
-    if (!result) return undefined;
-    return (
-      (intersect(featureCollection([result, mask])) as RegionFeature | null) ??
-      undefined
-    );
-  }, masks[0]);
+  return intersection
+    ? filterRegionComponentsByArea(intersection, minimumAreaSquareMeters)
+    : undefined;
 }
 
 export function clipSurfaceCollection(

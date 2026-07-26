@@ -3,7 +3,9 @@ import { normalizeHeatmapFeatures, pointMatchesRegions } from "./composition";
 import {
   areaOfInterestIsWithinLimit,
   clipRegions,
+  filterRegionComponentsByArea,
   intersectRegionGroups,
+  MINIMUM_RESULT_REGION_AREA_SQUARE_METERS,
   regionBoundingBoxDimensionsMiles,
   regionViewport,
   simplifyRegionCollection,
@@ -83,6 +85,34 @@ describe("region collection simplification", () => {
     expect(pointMatchesRegions(inside, [boundary!])).toBe(true);
     expect(pointMatchesRegions(outside, [boundary!])).toBe(false);
     expect(intersectRegionGroups([[square(0)], [square(5)]])).toBeUndefined();
+  });
+
+  it("treats an empty region source as an empty AND constraint", () => {
+    expect(intersectRegionGroups([[square(0)], []])).toBeUndefined();
+  });
+
+  it("removes result components at or below 100,000 square meters", () => {
+    const large = rectangle(0, 0, 0.01, 0.01);
+    const tiny = rectangle(0.02, 0, 0.021, 0.001);
+    const combined = {
+      type: "Feature" as const,
+      properties: {},
+      geometry: {
+        type: "MultiPolygon" as const,
+        coordinates: [
+          large.geometry.coordinates,
+          tiny.geometry.coordinates,
+        ],
+      },
+    };
+
+    const filtered = filterRegionComponentsByArea(combined);
+
+    expect(MINIMUM_RESULT_REGION_AREA_SQUARE_METERS).toBe(100_000);
+    expect(filtered?.geometry.type).toBe("Polygon");
+    expect(filtered?.geometry.coordinates).toEqual(large.geometry.coordinates);
+    expect(intersectRegionGroups([[tiny], [tiny]])).toBeUndefined();
+    expect(intersectRegionGroups([[tiny], [tiny]], 0)).toBeDefined();
   });
 
   it("measures and validates the Area of Interest bounding box", () => {

@@ -132,9 +132,11 @@ tab. The action is disabled until an Area of Interest exists.
   area, filters, and heatmaps remain active. **RESET WORKSPACE** removes the
   area along with every configured filter and heatmap after confirmation.
 - Active extension filters combine with AND semantics.
-- Region-producing filters add host-rendered, non-editable regions. Their
-  controls replace those regions, removing the filter removes them, and their
-  visible geometry is clipped to the Area of Interest.
+- Region-producing filters add a host-rendered, non-editable result boundary.
+  Their regions are unioned within each filter and intersected across filters,
+  so the map shows only the common area.
+- Result components at or below 100,000 square meters (about 24.7 acres) are
+  removed.
 - Filter regions intersect with the Area of Interest and all point predicates.
 - Every point and surface heatmap is clipped to the resulting boundary.
 - Settings and regions are intentionally session-only in this increment.

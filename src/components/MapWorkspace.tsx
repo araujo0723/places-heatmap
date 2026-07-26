@@ -30,7 +30,6 @@ import {
 } from "../core/composition";
 import {
   areaOfInterestIsWithinLimit,
-  clipRegions,
   clipSurfaceCollection,
   intersectRegionGroups,
   MAX_AREA_OF_INTEREST_DIMENSION_MILES,
@@ -950,62 +949,48 @@ export default function MapWorkspace() {
         .filter((predicate): predicate is PointPredicate => !!predicate),
     [activeFilters, filterRuntime],
   );
-  const ownedRegions = useMemo(
+  const regionFilters = useMemo(
     () =>
-      activeFilters.flatMap(
-        ({ instanceId, entry }) =>
-          (filterRuntime[instanceId]?.regions ?? []).map((region) => {
-            const style = entry.contribution.regionStyle;
-            if (!style) return region;
-            return {
-              ...region,
-              properties: {
-                ...region.properties,
-                ...(style.fillColor
-                  ? { [REGION_STYLE_PROPERTIES.fillColor]: style.fillColor }
-                  : {}),
-                ...(style.fillOpacity !== undefined
-                  ? {
-                      [REGION_STYLE_PROPERTIES.fillOpacity]:
-                        style.fillOpacity,
-                    }
-                  : {}),
-                ...(style.lineColor
-                  ? { [REGION_STYLE_PROPERTIES.lineColor]: style.lineColor }
-                  : {}),
-                ...(style.lineWidth !== undefined
-                  ? {
-                      [REGION_STYLE_PROPERTIES.lineWidth]: style.lineWidth,
-                    }
-                  : {}),
-                ...(style.lineOpacity !== undefined
-                  ? {
-                      [REGION_STYLE_PROPERTIES.lineOpacity]:
-                        style.lineOpacity,
-                    }
-                  : {}),
-              },
-            };
-          }),
+      activeFilters.filter(
+        ({ entry }) => !!entry.contribution.resolveRegions,
       ),
-    [activeFilters, filterRuntime],
-  );
-  const visibleOwnedRegions = useMemo(
-    () =>
-      areaOfInterest
-        ? clipRegions(ownedRegions, [areaOfInterest])
-        : [],
-    [areaOfInterest, ownedRegions],
+    [activeFilters],
   );
   const constrainedBoundary = useMemo(() => {
     if (!areaOfInterest) return undefined;
     return intersectRegionGroups([
       [areaOfInterest],
-      ...activeFilters.map(
+      ...regionFilters.map(
         ({ instanceId }) => filterRuntime[instanceId]?.regions ?? [],
       ),
     ]);
-  }, [activeFilters, areaOfInterest, filterRuntime]);
+  }, [areaOfInterest, filterRuntime, regionFilters]);
+  const visibleOwnedRegions = useMemo(() => {
+    if (!constrainedBoundary || regionFilters.length === 0) return [];
+
+    const properties = { ...constrainedBoundary.properties };
+    for (const { entry } of regionFilters) {
+      const style = entry.contribution.regionStyle;
+      if (!style) continue;
+      if (style.fillColor) {
+        properties[REGION_STYLE_PROPERTIES.fillColor] = style.fillColor;
+      }
+      if (style.fillOpacity !== undefined) {
+        properties[REGION_STYLE_PROPERTIES.fillOpacity] = style.fillOpacity;
+      }
+      if (style.lineColor) {
+        properties[REGION_STYLE_PROPERTIES.lineColor] = style.lineColor;
+      }
+      if (style.lineWidth !== undefined) {
+        properties[REGION_STYLE_PROPERTIES.lineWidth] = style.lineWidth;
+      }
+      if (style.lineOpacity !== undefined) {
+        properties[REGION_STYLE_PROPERTIES.lineOpacity] = style.lineOpacity;
+      }
+    }
+
+    return [{ ...constrainedBoundary, properties }];
+  }, [constrainedBoundary, regionFilters]);
   const actionRegions = useMemo<FeatureCollection<RegionGeometry>>(() => {
     return {
       type: "FeatureCollection",
@@ -1018,6 +1003,7 @@ export default function MapWorkspace() {
   const actionsDisabled =
     !mapReady ||
     !areaOfInterest ||
+    !constrainedBoundary ||
     activeFilters.some(
       ({ instanceId, entry }) => {
         const runtime = filterRuntime[instanceId];
