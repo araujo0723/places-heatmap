@@ -33,6 +33,10 @@ function AddressPicker({
   const [searching, setSearching] = useState(false);
   const proximityLongitude = proximity[0];
   const proximityLatitude = proximity[1];
+  const normalizedQuery = query.trim();
+  const addressIsValid =
+    address !== undefined && normalizedQuery === address.address;
+  const addressIsInvalid = normalizedQuery.length > 0 && !addressIsValid;
 
   useEffect(() => {
     if (address && query !== address.address) setQuery(address.address);
@@ -122,6 +126,47 @@ function AddressPicker({
               aria-hidden="true"
               className="absolute top-1/2 right-3 h-3 w-3 -translate-y-1/2 animate-spin rounded-full border-2 border-slate-300 border-t-red-500"
             />
+          ) : addressIsValid ? (
+            <span
+              aria-label="Valid address"
+              className="absolute top-1/2 right-2.5 grid size-4 -translate-y-1/2 place-items-center rounded-full bg-emerald-500 text-white"
+              role="img"
+            >
+              <svg
+                aria-hidden="true"
+                className="size-2.5"
+                fill="none"
+                viewBox="0 0 12 12"
+              >
+                <path
+                  d="m2.25 6.25 2.25 2.25 5.25-5.25"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="1.75"
+                />
+              </svg>
+            </span>
+          ) : addressIsInvalid ? (
+            <span
+              aria-label="Invalid address"
+              className="absolute top-1/2 right-2.5 grid size-4 -translate-y-1/2 place-items-center rounded-full bg-red-500 text-white"
+              role="img"
+            >
+              <svg
+                aria-hidden="true"
+                className="size-2.5"
+                fill="none"
+                viewBox="0 0 12 12"
+              >
+                <path
+                  d="m3.25 3.25 5.5 5.5m0-5.5-5.5 5.5"
+                  stroke="currentColor"
+                  strokeLinecap="round"
+                  strokeWidth="1.75"
+                />
+              </svg>
+            </span>
           ) : null}
         </span>
       </label>
@@ -156,11 +201,6 @@ function AddressPicker({
       {message ? (
         <p className="text-[11px] leading-4 text-slate-500" aria-live="polite">
           {message}
-        </p>
-      ) : null}
-      {address ? (
-        <p className="text-[11px] font-medium text-emerald-700">
-          Valid address selected
         </p>
       ) : null}
     </div>

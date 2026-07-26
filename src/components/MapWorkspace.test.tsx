@@ -1307,6 +1307,9 @@ describe("MapWorkspace", () => {
       51.512,
       2,
     );
+    expect(
+      await screen.findByRole("img", { name: "Invalid address" }),
+    ).toBeInTheDocument();
     await user.click(
       await screen.findByRole(
         "button",
@@ -1314,6 +1317,12 @@ describe("MapWorkspace", () => {
         { timeout: 2_000 },
       ),
     );
+    expect(
+      screen.getByRole("img", { name: "Valid address" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Valid address selected"),
+    ).not.toBeInTheDocument();
 
     await waitFor(() =>
       expect(

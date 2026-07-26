@@ -1981,7 +1981,7 @@ export default function MapWorkspace() {
                           : "border-slate-200/70 opacity-70"
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center justify-between gap-3">
                         <p className="flex min-w-0 items-center gap-2 text-xs font-semibold text-slate-900">
                           {selection.entry.extension.icon ? (
                             <img
@@ -2103,7 +2103,7 @@ export default function MapWorkspace() {
                           : "border-slate-200/70 opacity-70"
                       }`}
                     >
-                      <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center justify-between gap-3">
                         <p className="flex min-w-0 items-center gap-2 text-xs font-semibold text-slate-900">
                           {selection.entry.extension.icon ? (
                             <img
