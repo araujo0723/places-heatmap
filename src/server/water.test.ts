@@ -60,7 +60,7 @@ describe("water data service", () => {
     ]);
   });
 
-  it("writes six-hour cache entries and reuses memory", async () => {
+  it("writes one-year cache entries and reuses memory", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
         elements: [
@@ -97,6 +97,7 @@ describe("water data service", () => {
     expect(first).toHaveLength(1);
     expect(second).toEqual(first);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(WATER_CACHE_TTL_SECONDS).toBe(31_536_000);
     expect(writes[0][2]).toEqual({ EX: WATER_CACHE_TTL_SECONDS });
   });
 

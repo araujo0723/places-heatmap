@@ -55,7 +55,7 @@ export interface ParkServiceDependencies {
   orsApiKey?: string;
 }
 
-export const PARK_CACHE_TTL_SECONDS = 21_600;
+export const PARK_CACHE_TTL_SECONDS = 365 * 24 * 60 * 60;
 const CACHE_PREFIX = "places-heatmap:parks:v1:";
 const memoryCache = new Map<string, CachedTile>();
 const inFlight = new Map<string, Promise<Map<string, ParkRecord[]>>>();

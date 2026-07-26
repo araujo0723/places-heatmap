@@ -34,6 +34,8 @@ export interface CommuteServiceDependencies {
 const NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org";
 const ORS_BASE_URL = "https://api.openrouteservice.org";
 const USER_AGENT = "places-heatmap/0.1 (+local-app)";
+export const ISOCHRONE_CACHE_TTL_MILLISECONDS =
+  365 * 24 * 60 * 60 * 1_000;
 const requestCache = new Map<
   string,
   { expiresAt: number; value: Promise<unknown> }
@@ -438,7 +440,7 @@ export async function getDrivingIsochrones(
   const cacheKey = `commute-isochrone:${center[0].toFixed(6)},${center[1].toFixed(6)}:${normalizedMinutes.join(",")}`;
   return withMemoryCache(
     cacheKey,
-    30 * 24 * 60 * 60 * 1_000,
+    ISOCHRONE_CACHE_TTL_MILLISECONDS,
     async () => {
       const url = new URL(
         "/v2/isochrones/driving-car",

@@ -21,7 +21,7 @@ export interface WaterServiceDependencies {
   overpassUrl?: string;
 }
 
-export const WATER_CACHE_TTL_SECONDS = 21_600;
+export const WATER_CACHE_TTL_SECONDS = 365 * 24 * 60 * 60;
 const CACHE_PREFIX = "places-heatmap:water:v1:";
 const memoryCache = new Map<string, CachedTile>();
 const inFlight = new Map<string, Promise<Map<string, WaterRecord[]>>>();

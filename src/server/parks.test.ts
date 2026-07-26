@@ -71,7 +71,7 @@ describe("park data service", () => {
     ]);
   });
 
-  it("batches missing tiles, writes six-hour cache entries, and reuses memory", async () => {
+  it("batches missing tiles, writes one-year cache entries, and reuses memory", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
         elements: [
@@ -106,6 +106,7 @@ describe("park data service", () => {
     expect(first).toHaveLength(1);
     expect(second).toEqual(first);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(PARK_CACHE_TTL_SECONDS).toBe(31_536_000);
     expect(writes[0][2]).toEqual({ EX: PARK_CACHE_TTL_SECONDS });
   });
 

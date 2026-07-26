@@ -2,6 +2,7 @@ import { vi } from "vitest";
 import {
   clearCommuteMemoryCache,
   getDrivingIsochrones,
+  ISOCHRONE_CACHE_TTL_MILLISECONDS,
   lookupAddressSuggestions,
   normalizeIsochrones,
   normalizeNominatimSuggestions,
@@ -10,6 +11,10 @@ import {
 
 describe("commute data service", () => {
   beforeEach(() => clearCommuteMemoryCache());
+
+  it("retains isochrones for one year", () => {
+    expect(ISOCHRONE_CACHE_TTL_MILLISECONDS).toBe(31_536_000_000);
+  });
 
   it("normalizes valid address suggestions from both geocoders", () => {
     expect(
