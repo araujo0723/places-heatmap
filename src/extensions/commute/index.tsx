@@ -19,13 +19,14 @@ const EMPTY_REGIONS = {
 export default defineExtension({
   apiVersion: 1,
   id: "commute",
-  name: "Commute time",
+  name: "Commute",
+  icon: "/icons/car.svg",
   description:
     "Driving-time regions around a validated destination address.",
   filters: [
     {
       id: "time",
-      name: "Commute time",
+      name: "Commute",
       initialState: { minutes: 30 } satisfies CommuteFilterState,
       Controls: CommuteFilterControls,
       regionStyle: {
@@ -53,7 +54,7 @@ export default defineExtension({
     {
       kind: "surface",
       id: "travel-time",
-      name: "Commute time",
+      name: "Commute",
       initialState: {} satisfies CommuteHeatmapState,
       Controls: CommuteHeatmapControls,
       load: async ({ address }: CommuteHeatmapState, context) => {

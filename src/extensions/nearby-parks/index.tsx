@@ -66,13 +66,14 @@ function DistanceControls({
 export default defineExtension({
   apiVersion: 1,
   id: "nearby-parks",
-  name: "Nearby parks",
+  name: "Parks",
+  icon: "/icons/tree.svg",
   description:
     "OpenStreetMap city parks in the current view and the surrounding 5 km.",
   filters: [
     {
       id: "distance",
-      name: "Park distance",
+      name: "Parks",
       initialState: { distance: 300 },
       Controls: DistanceControls,
       resolveRegions: async ({ distance }, context) => {
@@ -92,7 +93,7 @@ export default defineExtension({
     {
       kind: "surface",
       id: "influence",
-      name: "Park influence",
+      name: "Parks",
       initialState: {},
       load: async (_state, context) => {
         const parks = await loadNearbyParks(context.viewport, context.signal);

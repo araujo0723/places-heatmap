@@ -66,13 +66,14 @@ function DistanceControls({
 export default defineExtension({
   apiVersion: 1,
   id: "nearby-water",
-  name: "Nearby water",
+  name: "Lakes",
+  icon: "/icons/water.svg",
   description:
     "OpenStreetMap lakes, ponds, reservoirs, and similar enclosed bodies of water in the current view and the surrounding 5 km.",
   filters: [
     {
       id: "distance",
-      name: "Water distance",
+      name: "Lakes",
       initialState: { distance: 300 },
       Controls: DistanceControls,
       regionStyle: {
@@ -96,7 +97,7 @@ export default defineExtension({
     {
       kind: "surface",
       id: "influence",
-      name: "Water influence",
+      name: "Lakes",
       initialState: {},
       load: async (_state, context) => {
         const waters = await loadNearbyWater(context.viewport, context.signal);

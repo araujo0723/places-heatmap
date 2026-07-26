@@ -23,10 +23,10 @@ async function drawArea(page: Page) {
 }
 
 const contributionLabels: Record<string, string> = {
-  "nearby-parks/distance": "Nearby parks · Park distance",
-  "nearby-water/distance": "Nearby water · Water distance",
-  "nearby-parks/influence": "Nearby parks · Park influence",
-  "nearby-water/influence": "Nearby water · Water influence",
+  "nearby-parks/distance": "Parks",
+  "nearby-water/distance": "Lakes",
+  "nearby-parks/influence": "Parks",
+  "nearby-water/influence": "Lakes",
 };
 
 async function addContribution(
@@ -51,7 +51,9 @@ test("starts with the bundled data contributions", async ({ page }) => {
   await expect(page.getByText("No active filters")).toBeVisible();
   await expect(page.getByText("No active heatmaps")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Actions" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "GO TO ZILLOW" })).toBeEnabled();
+  const zillowButton = page.getByRole("button", { name: "GO TO ZILLOW" });
+  await expect(zillowButton).toBeEnabled();
+  await expect(zillowButton.locator('img[src="/icons/house.svg"]')).toBeVisible();
   await expect(page.getByText("Places workspace")).toHaveCount(0);
   await expect(page.getByText("Explore the map")).toHaveCount(0);
   await expect(
@@ -63,6 +65,17 @@ test("starts with the bundled data contributions", async ({ page }) => {
   await expect(
     page.getByRole("button", { name: "Add Heatmap" }),
   ).toBeEnabled();
+  await page.getByRole("button", { name: "Add Filter" }).click();
+  await expect(
+    page.getByRole("menuitem", { name: "Parks" }).locator("img"),
+  ).toHaveAttribute("src", "/icons/tree.svg");
+  await expect(
+    page.getByRole("menuitem", { name: "Lakes" }).locator("img"),
+  ).toHaveAttribute("src", "/icons/water.svg");
+  await expect(
+    page.getByRole("menuitem", { name: "Commute" }).locator("img"),
+  ).toHaveAttribute("src", "/icons/car.svg");
+  await page.keyboard.press("Escape");
   await expect(
     page.getByRole("heading", { name: "Area of interest" }),
   ).toHaveCount(0);
@@ -97,6 +110,12 @@ test("shows one unfaded, unclipped hint for header buttons", async ({
   await page.goto("/");
   await drawArea(page);
   await addContribution(page, "Filter", "nearby-parks/distance");
+  await expect(
+    page
+      .getByRole("button", { name: "Remove Parks filter" })
+      .locator("xpath=ancestor::article")
+      .locator('img[src="/icons/tree.svg"]'),
+  ).toBeVisible();
 
   for (const label of [
     "Set origin",
@@ -179,8 +198,14 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
   await page.getByRole("slider", { name: "Park distance" }).fill("0");
 
   await addContribution(page, "Heatmap", "nearby-parks/influence");
+  await expect(
+    page
+      .getByRole("button", { name: "Remove Parks heatmap" })
+      .locator("xpath=ancestor::article")
+      .locator('img[src="/icons/tree.svg"]'),
+  ).toBeVisible();
   await expect(page.getByTestId("map-active-summary")).toContainText(
-    "Park influence2",
+    "Parks2",
   );
   const settledParkRequests = parkRequests;
   expect(settledParkRequests).toBeGreaterThan(0);
@@ -201,9 +226,9 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
   }
   expect(parkRequests).toBe(settledParkRequests);
 
-  await page.getByRole("button", { name: "Remove Park distance" }).click();
+  await page.getByRole("button", { name: "Remove Parks filter" }).click();
   await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
-  await page.getByRole("button", { name: "Remove Park influence" }).click();
+  await page.getByRole("button", { name: "Remove Parks heatmap" }).click();
 });
 
 test("loads nearby water regions and blue influence contours", async ({ page }) => {
@@ -246,7 +271,7 @@ test("loads nearby water regions and blue influence contours", async ({ page }) 
 
   await addContribution(page, "Heatmap", "nearby-water/influence");
   await expect(page.getByTestId("map-active-summary")).toContainText(
-    "Water influence2",
+    "Lakes2",
   );
   expect(waterRequests).toBeGreaterThan(0);
 });
@@ -266,11 +291,11 @@ test("allows duplicate heatmap instances", async ({ page }) => {
   await addContribution(page, "Heatmap", "nearby-parks/influence");
 
   const removeButtons = page.getByRole("button", {
-    name: "Remove Park influence",
+    name: "Remove Parks heatmap",
   });
   await expect(removeButtons).toHaveCount(2);
   await expect(
-    page.getByTestId("map-active-summary").getByText("Park influence"),
+    page.getByTestId("map-active-summary").getByText("Parks"),
   ).toHaveCount(2);
 
   await removeButtons.first().click();

@@ -137,6 +137,7 @@ export interface MapExtension {
   apiVersion: 1;
   id: string;
   name: string;
+  icon?: string;
   description?: string;
   actions?: ReadonlyArray<ActionContribution>;
   filters?: ReadonlyArray<FilterContribution<any>>;

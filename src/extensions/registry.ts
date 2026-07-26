@@ -82,6 +82,7 @@ function validateExtension(value: unknown): value is MapExtension {
     candidate.apiVersion === 1 &&
     hasText(candidate.id) &&
     hasText(candidate.name) &&
+    (candidate.icon === undefined || hasText(candidate.icon)) &&
     (candidate.actions === undefined || Array.isArray(candidate.actions)) &&
     (candidate.filters === undefined || Array.isArray(candidate.filters)) &&
     (candidate.heatmaps === undefined || Array.isArray(candidate.heatmaps))

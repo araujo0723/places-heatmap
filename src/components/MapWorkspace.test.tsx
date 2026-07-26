@@ -192,14 +192,14 @@ async function drawArea(user: ReturnType<typeof userEvent.setup>) {
 }
 
 const contributionLabels: Record<string, string> = {
-  "nearby-parks/distance": "Nearby parks · Park distance",
-  "nearby-water/distance": "Nearby water · Water distance",
-  "commute/time": "Commute time · Commute time",
-  "nearby-parks/influence": "Nearby parks · Park influence",
-  "nearby-water/influence": "Nearby water · Water influence",
-  "commute/travel-time": "Commute time · Commute time",
-  "test/reject-all": "Test contributions · Reject all",
-  "test/points": "Test contributions · Test points",
+  "nearby-parks/distance": "Parks",
+  "nearby-water/distance": "Lakes",
+  "commute/time": "Commute",
+  "nearby-parks/influence": "Parks",
+  "nearby-water/influence": "Lakes",
+  "commute/travel-time": "Commute",
+  "test/reject-all": "Reject all",
+  "test/points": "Test points",
 };
 
 async function addContribution(
@@ -353,6 +353,11 @@ describe("MapWorkspace", () => {
       screen.getByRole("button", { name: "GO TO ZILLOW" }),
     ).toBeEnabled();
     expect(
+      screen
+        .getByRole("button", { name: "GO TO ZILLOW" })
+        .querySelector('img[src="/icons/house.svg"]'),
+    ).toBeInTheDocument();
+    expect(
       screen.getByRole("button", { name: "Set origin" }),
     ).toBeEnabled();
     expect(
@@ -396,10 +401,10 @@ describe("MapWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1");
     expect(
-      screen.getByRole("button", { name: "Remove Park distance" }),
+      screen.getByRole("button", { name: "Remove Parks filter" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Remove Park influence" }),
+      screen.getByRole("button", { name: "Remove Parks heatmap" }),
     ).toBeInTheDocument();
 
     await user.click(resetAllButton);
@@ -599,7 +604,7 @@ describe("MapWorkspace", () => {
     await waitFor(
       () =>
         expect(screen.getByTestId("map-active-summary")).toHaveTextContent(
-          "Park influence2",
+          "Parks2",
         ),
       { timeout: 5_000 },
     );
@@ -746,7 +751,7 @@ describe("MapWorkspace", () => {
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
 
     const toggle = screen.getByRole("switch", {
-      name: "Park distance enabled",
+      name: "Parks enabled",
     });
     expect(toggle).toHaveAttribute("aria-checked", "true");
 
@@ -793,7 +798,7 @@ describe("MapWorkspace", () => {
     await addContribution(user, "Heatmap", "nearby-parks/influence");
 
     const toggle = screen.getByRole("switch", {
-      name: "Park influence visible",
+      name: "Parks visible",
     });
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(screen.getByText("Loading")).toBeInTheDocument();
@@ -821,7 +826,7 @@ describe("MapWorkspace", () => {
 
     expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(screen.getByTestId("map-active-summary")).toHaveTextContent(
-      "Park influence",
+      "Parks",
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -912,19 +917,19 @@ describe("MapWorkspace", () => {
     await waitFor(() =>
       expect(
         screen.getAllByRole("button", {
-          name: "Remove Park influence",
+          name: "Remove Parks heatmap",
         }),
       ).toHaveLength(2),
     );
 
     await user.click(
       screen.getAllByRole("button", {
-        name: "Remove Park influence",
+        name: "Remove Parks heatmap",
       })[0],
     );
     expect(
       screen.getAllByRole("button", {
-        name: "Remove Park influence",
+        name: "Remove Parks heatmap",
       }),
     ).toHaveLength(1);
   });

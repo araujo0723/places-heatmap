@@ -101,6 +101,7 @@ export default defineExtension({
   apiVersion: 1,
   id: "my-extension",
   name: "My extension",
+  icon: "/icons/my-extension.svg",
   actions: [],
   filters: [],
   heatmaps: [],
@@ -177,22 +178,22 @@ tab. The action is disabled until an Area of Interest exists.
   independently.
 - Settings and regions are intentionally session-only in this increment.
 
-## Nearby parks
+## Parks
 
-The bundled Nearby parks extension queries local OpenStreetMap
+The bundled Parks extension queries local OpenStreetMap
 `leisure=park` objects for the Area of Interest plus 5 km and shares a six-hour
 client cache between its filter and heatmap.
 
-- **Park distance** creates a bbox-expanded or circular filter region for every
+- **Parks** under Filters creates a bbox-expanded or circular region for every
   park, from 0 to 2,000 m.
-- **Park influence** renders a full-strength park core and twelve geographic
+- **Parks** under Heatmaps renders a full-strength park core and twelve geographic
   contour bands fading to zero at 300 m.
 - The entire expanded Area of Interest is loaded in one local-index request,
   without a tile or result-count limit.
 
-## Nearby water
+## Lakes
 
-The bundled Nearby water extension queries OpenStreetMap lakes, ponds,
+The bundled Lakes extension queries OpenStreetMap lakes, ponds,
 reservoirs, basins, lagoons, oxbows, cenotes, stream pools, reflecting pools,
 moats, salt ponds, and unclassified enclosed `natural=water` features from the
 local PBF for the Area of Interest plus 5 km. Commonly used `water=fishpond`
@@ -200,23 +201,23 @@ records are included,
 while explicit linear water types such as rivers, canals, streams, and ditches
 are excluded. Its filter and heatmap share a six-hour client cache.
 
-- **Water distance** creates a blue bbox-expanded or circular filter region for
+- **Lakes** under Filters creates a blue bbox-expanded or circular region for
   every body of water, from 0 to 2,000 m.
-- **Water influence** renders a blue, full-strength water core and twelve
+- **Lakes** under Heatmaps renders a blue, full-strength water core and twelve
   geographic contour bands fading to zero at 300 m.
 - The entire expanded Area of Interest is loaded in one local-index request,
   without a tile or result-count limit.
 
-## Commute time
+## Commute
 
-The bundled Commute time extension looks up and validates destination addresses
+The bundled Commute extension looks up and validates destination addresses
 before requesting driving isochrones from openrouteservice. Set `ORS_API_KEY`
 in `.env` to enable both contributions:
 
-- **Commute time** under Filters draws a red outline and constrains all active
+- **Commute** under Filters draws a red outline and constrains all active
   data to the selected 5–60 minute region. The slider advances in five-minute
   intervals.
-- **Commute time** under Heatmaps accepts only an address. It renders exact
+- **Commute** under Heatmaps accepts only an address. It renders exact
   20- and 40-minute contours with additional five-minute transition bands,
   fading from green through yellow to transparent.
 

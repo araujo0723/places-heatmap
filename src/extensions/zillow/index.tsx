@@ -50,12 +50,18 @@ function ZillowControls({ disabled, regions }: ActionControlProps) {
   return (
     <div>
       <button
-        className="w-full rounded-lg bg-[#006aff] px-3 py-2 text-xs font-bold tracking-wide text-white shadow-sm hover:bg-[#0055cc] focus:ring-2 focus:ring-blue-300 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#006aff] px-3 py-2 text-xs font-bold tracking-wide text-white shadow-sm hover:bg-[#0055cc] focus:ring-2 focus:ring-blue-300 focus:outline-none disabled:cursor-not-allowed disabled:opacity-40"
         type="button"
         disabled={disabled || loading || !bounds}
         onClick={() => void openZillow()}
       >
-        {loading ? "CREATING ZILLOW REGION…" : "GO TO ZILLOW"}
+        <img
+          alt=""
+          aria-hidden="true"
+          className="size-4 brightness-0 invert"
+          src="/icons/house.svg"
+        />
+        <span>{loading ? "CREATING ZILLOW REGION…" : "GO TO ZILLOW"}</span>
       </button>
       {error ? (
         <p className="mt-2 text-[11px] leading-4 text-rose-600" role="alert">
@@ -70,6 +76,7 @@ export default defineExtension({
   apiVersion: 1,
   id: "zillow",
   name: "Zillow",
+  icon: "/icons/house.svg",
   description: "Open the current intersecting region in Zillow rentals.",
   actions: [
     {
