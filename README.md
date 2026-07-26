@@ -214,7 +214,11 @@ are excluded. Its filter and heatmap share a six-hour client cache.
 
 The bundled Commute extension looks up and validates destination addresses
 before requesting driving isochrones from openrouteservice. Set `ORS_API_KEY`
-in `.env` to enable both contributions:
+in `.env` to enable both contributions. Start a local Redis server on
+`127.0.0.1:6379`, or set `REDIS_URL` to another Redis connection URL. Each
+destination and commute-time contour is stored under a hashed key for 12
+months, allowing filters and heatmaps with overlapping times to reuse the same
+contour:
 
 - **Commute** under Filters draws a red outline and constrains all active
   data to the selected 5–60 minute region. The slider advances in five-minute

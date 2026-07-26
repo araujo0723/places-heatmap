@@ -46,6 +46,7 @@
     "osm-pbf-parser-node": "^1.1.4",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "redis": "^5.12.1",
     "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
