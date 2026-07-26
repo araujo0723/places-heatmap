@@ -1,6 +1,6 @@
-import type { GeoBounds } from "../core/geo";
+import type { GeoBounds } from "../../../core/geo";
+import { queryLocalOsm } from "../../../server/osm-pbf";
 import type { ParkRecord } from "../core/parks";
-import { queryLocalOsm } from "./osm-pbf";
 
 export interface ParkServiceDependencies {
   pbfPath?: string;

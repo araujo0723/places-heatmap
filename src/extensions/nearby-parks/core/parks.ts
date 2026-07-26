@@ -1,6 +1,6 @@
-import type { GeoBounds } from "./geo";
+import type { GeoBounds } from "../../../core/geo";
 
-export interface WaterRecord {
+export interface ParkRecord {
   id: string;
   name?: string;
   center: [number, number];

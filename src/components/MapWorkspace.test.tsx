@@ -167,9 +167,22 @@ vi.mock("maplibre-gl", () => {
 
 import MapWorkspace from "./MapWorkspace";
 import { Map as MapLibreMap } from "maplibre-gl";
-import { clearNearbyParkCache } from "../extensions/nearby-parks/data";
-import { clearNearbyWaterCache } from "../extensions/nearby-water/data";
 import { extensionRegistry } from "../extensions/registry";
+
+const optionalExtensionDataModules = import.meta.glob(
+  "../extensions/*/data.ts",
+  { eager: true },
+) as Record<string, Record<string, unknown>>;
+
+function clearOptionalExtensionCaches() {
+  for (const module of Object.values(optionalExtensionDataModules)) {
+    for (const [name, value] of Object.entries(module)) {
+      if (/^clear.*Cache$/.test(name) && typeof value === "function") {
+        value();
+      }
+    }
+  }
+}
 
 async function drawArea(user: ReturnType<typeof userEvent.setup>) {
   void user;
@@ -203,8 +216,7 @@ async function addContribution(
 describe("MapWorkspace", () => {
   beforeEach(() => {
     localStorage.clear();
-    clearNearbyParkCache();
-    clearNearbyWaterCache();
+    clearOptionalExtensionCaches();
   });
 
   afterEach(() => {
@@ -666,7 +678,7 @@ describe("MapWorkspace", () => {
     );
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
 
-    clearNearbyParkCache();
+    clearOptionalExtensionCaches();
     const slider = screen.getByRole("slider", { name: "Park distance" });
     fireEvent.change(slider, { target: { value: "350" } });
     fireEvent.pointerUp(slider);

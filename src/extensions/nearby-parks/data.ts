@@ -1,6 +1,6 @@
 import { boundsIntersect, parkQueryCoverage } from "../../core/geo";
-import type { ParkRecord } from "../../core/parks";
 import type { MapViewport } from "../api";
+import type { ParkRecord } from "./core/parks";
 
 interface ParkResponse {
   parks?: unknown;

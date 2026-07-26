@@ -1,9 +1,9 @@
 import { useEffect, useId, useRef, useState } from "react";
-import type { ControlProps } from "../api";
 import {
   searchAddresses,
   type AddressSelection,
-} from "./data";
+} from "../../core/address-search";
+import type { ControlProps } from "../api";
 
 export interface CommuteFilterState {
   address?: AddressSelection;

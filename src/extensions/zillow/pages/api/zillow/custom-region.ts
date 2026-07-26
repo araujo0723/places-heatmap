@@ -2,9 +2,9 @@ import type { APIRoute } from "astro";
 import type {
   ZillowCoordinate,
   ZillowPolygon,
-} from "../../../extensions/zillow/geometry";
-import { preparePolygonsForZillow } from "../../../extensions/zillow/geometry";
-import { buildZillowRegionSaveRequest } from "../../../extensions/zillow/zillow";
+} from "../../../geometry";
+import { preparePolygonsForZillow } from "../../../geometry";
+import { buildZillowRegionSaveRequest } from "../../../zillow";
 
 interface ZillowResponse {
   data?: {

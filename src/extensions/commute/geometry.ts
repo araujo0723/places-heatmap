@@ -6,7 +6,7 @@ import type {
   MultiPolygon,
   Polygon,
 } from "geojson";
-import type { IsochroneProperties } from "../../server/commute";
+import type { IsochroneProperties } from "./server/commute";
 import type {
   RegionFeature,
   RegionGeometry,

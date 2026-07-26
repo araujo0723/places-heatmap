@@ -1,6 +1,6 @@
 import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
 import { point } from "@turf/helpers";
-import type { ParkRecord } from "../../core/parks";
+import type { ParkRecord } from "./core/parks";
 import { parkFilterRegions, parkHeatContours } from "./geometry";
 
 const parks: ParkRecord[] = [

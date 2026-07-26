@@ -1,4 +1,4 @@
-import type { WaterRecord } from "../../core/water";
+import type { WaterRecord } from "./core/water";
 import { waterFilterRegions, waterHeatContours } from "./geometry";
 
 const waters: WaterRecord[] = [

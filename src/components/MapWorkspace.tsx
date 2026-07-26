@@ -29,7 +29,7 @@ import {
 import {
   searchAddresses,
   type AddressSelection,
-} from "../extensions/commute/data";
+} from "../core/address-search";
 import type {
   HostedPoint,
   MapViewport,

@@ -1,10 +1,10 @@
 import { vi } from "vitest";
 
-vi.mock("../server/parks", () => ({
+vi.mock("./server/parks", () => ({
   getParksForBounds: vi.fn(async () => []),
 }));
 
-import { GET } from "../pages/api/parks";
+import { GET } from "./pages/api/parks";
 
 function request(query = "") {
   return GET({

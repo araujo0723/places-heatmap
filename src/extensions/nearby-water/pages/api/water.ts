@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
-import { getParksForBounds } from "../../server/parks";
-import { parseRequestBounds } from "../../server/request-bounds";
+import { parseRequestBounds } from "../../../../server/request-bounds";
+import { getWaterForBounds } from "../../server/water";
 
 export const prerender = false;
 
@@ -20,7 +20,7 @@ export const GET: APIRoute = async ({ request }) => {
     return Response.json(
       {
         bounds,
-        parks: await getParksForBounds(bounds),
+        waters: await getWaterForBounds(bounds),
       },
       {
         headers: {
@@ -34,7 +34,7 @@ export const GET: APIRoute = async ({ request }) => {
         error:
           error instanceof Error
             ? error.message
-            : "Nearby parks could not be loaded.",
+            : "Nearby water could not be loaded.",
       },
       { status: 500 },
     );

@@ -86,9 +86,11 @@ npm start
 
 ## Extensions
 
-Extensions are trusted client-side source modules. Add a folder containing an
-`index.tsx` under `src/extensions/`, then restart the development server. Vite
-discovers every `src/extensions/*/index.tsx` entry automatically.
+Extensions are trusted source packages. Add or unzip a folder under
+`src/extensions/`, then restart the development server or rebuild the app.
+Vite discovers every `src/extensions/*/index.tsx` entry automatically. A
+missing folder is simply absent from the registry, so removing an extension
+does not require editing core registration code.
 
 An extension exports a versioned definition:
 
@@ -118,6 +120,30 @@ surface heatmap.
 Extensions never receive the MapLibre instance. The host validates data,
 composes all active predicates with the Area of Interest constraint, clips
 filter and heatmap geometry to that area, and owns map source/layer lifecycle.
+
+### Self-contained server APIs
+
+An extension can keep its client, core, server, tests, and Astro-style API
+pages together:
+
+```text
+src/extensions/my-extension/
+├── index.tsx
+├── core/
+├── server/
+└── pages/
+    └── api/
+        ├── places.ts
+        └── details/
+            └── index.ts
+```
+
+The host auto-discovers extension API pages. In this example they are exposed
+as `/api/places` and `/api/details`; supported route modules export the normal
+Astro method handlers such as `GET`, `POST`, or `ALL`. Route paths must be
+unique across installed extensions. Removing the extension folder also removes
+its UI contributions and API handlers on the next restart or build; unmatched
+extension API requests return `404`.
 
 ## Zillow
 

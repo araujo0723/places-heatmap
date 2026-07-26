@@ -1,10 +1,10 @@
 import { vi } from "vitest";
 
-vi.mock("../server/water", () => ({
+vi.mock("./server/water", () => ({
   getWaterForBounds: vi.fn(async () => []),
 }));
 
-import { GET } from "../pages/api/water";
+import { GET } from "./pages/api/water";
 
 function request(query = "") {
   return GET({

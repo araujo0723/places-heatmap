@@ -1,5 +1,5 @@
 import type { FeatureCollection, Polygon } from "geojson";
-import type { IsochroneProperties } from "../../server/commute";
+import type { IsochroneProperties } from "./server/commute";
 import { commuteHeatSurface } from "./geometry";
 
 function square(size: number, minutes: number) {

@@ -12,10 +12,14 @@ import { Writable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { OSMTransform, type OSMOptions } from "osm-pbf-parser-node";
 import { boundsIntersect, type GeoBounds } from "../core/geo";
-import type { ParkRecord } from "../core/parks";
-import type { WaterRecord } from "../core/water";
 
-type LocalOsmRecord = ParkRecord | WaterRecord;
+export interface LocalOsmRecord {
+  id: string;
+  name?: string;
+  center: [number, number];
+  bbox?: GeoBounds;
+}
+
 type RecordKind = "parks" | "waters";
 
 interface OsmMember {
@@ -60,8 +64,8 @@ interface SourceFingerprint {
 export interface LocalOsmIndex {
   version: 1;
   source: SourceFingerprint;
-  parks: ParkRecord[];
-  waters: WaterRecord[];
+  parks: LocalOsmRecord[];
+  waters: LocalOsmRecord[];
 }
 
 const INDEX_VERSION = 1;
@@ -227,8 +231,8 @@ function recordFromBounds(
 function addCandidateRecord(
   candidate: Candidate,
   record: LocalOsmRecord | undefined,
-  parks: ParkRecord[],
-  waters: WaterRecord[],
+  parks: LocalOsmRecord[],
+  waters: LocalOsmRecord[],
 ) {
   if (!record) return;
   if (candidate.parks) parks.push(record);
@@ -256,8 +260,8 @@ async function buildIndex(
   pbfPath: string,
   source: SourceFingerprint,
 ): Promise<LocalOsmIndex> {
-  const parks: ParkRecord[] = [];
-  const waters: WaterRecord[] = [];
+  const parks: LocalOsmRecord[] = [];
+  const waters: LocalOsmRecord[] = [];
   const candidateWays: CandidateWay[] = [];
   const candidateRelations: CandidateRelation[] = [];
   const relations = new Map<number, NormalizedMember[]>();
@@ -568,12 +572,12 @@ export async function queryLocalOsm(
   kind: "parks",
   bounds: GeoBounds,
   explicitPath?: string,
-): Promise<ParkRecord[]>;
+): Promise<LocalOsmRecord[]>;
 export async function queryLocalOsm(
   kind: "waters",
   bounds: GeoBounds,
   explicitPath?: string,
-): Promise<WaterRecord[]>;
+): Promise<LocalOsmRecord[]>;
 export async function queryLocalOsm(
   kind: RecordKind,
   bounds: GeoBounds,

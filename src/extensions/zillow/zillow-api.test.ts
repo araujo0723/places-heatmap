@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import { POST } from "../pages/api/zillow/custom-region";
+import { POST } from "./pages/api/zillow/custom-region";
 
 function request(polygons: unknown) {
   return POST({

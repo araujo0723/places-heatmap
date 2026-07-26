@@ -1,6 +1,6 @@
-import type { GeoBounds } from "../core/geo";
+import type { GeoBounds } from "../../../core/geo";
+import { queryLocalOsm } from "../../../server/osm-pbf";
 import type { WaterRecord } from "../core/water";
-import { queryLocalOsm } from "./osm-pbf";
 
 export interface WaterServiceDependencies {
   pbfPath?: string;

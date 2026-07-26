@@ -1,5 +1,5 @@
 import { vi } from "vitest";
-import type { GeoBounds } from "../core/geo";
+import type { GeoBounds } from "../../../core/geo";
 import { getParksForBounds } from "./parks";
 
 const bounds: GeoBounds = {

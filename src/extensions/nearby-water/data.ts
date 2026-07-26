@@ -1,6 +1,6 @@
 import { boundsIntersect, waterQueryCoverage } from "../../core/geo";
-import type { WaterRecord } from "../../core/water";
 import type { MapViewport } from "../api";
+import type { WaterRecord } from "./core/water";
 
 interface WaterResponse {
   waters?: unknown;

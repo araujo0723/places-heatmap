@@ -3,6 +3,7 @@ import { getDrivingIsochrones } from "../../../server/commute";
 
 export const prerender = false;
 
+// Discovered automatically from the extension's pages/api tree.
 export const POST: APIRoute = async ({ request }) => {
   let payload: unknown;
   try {

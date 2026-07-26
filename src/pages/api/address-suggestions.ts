@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { lookupAddressSuggestions } from "../../server/commute";
+import { lookupAddressSuggestions } from "../../server/address-search";
 
 export const prerender = false;
 
