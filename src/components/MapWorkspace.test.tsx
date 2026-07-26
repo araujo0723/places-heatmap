@@ -495,7 +495,7 @@ describe("MapWorkspace", () => {
     expect(screen.queryByText(/demo-places/i)).not.toBeInTheDocument();
   });
 
-  it("confirms and scopes clear-all actions by contribution type", async () => {
+  it("confirms RESET ALL and preserves the Area of Interest", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => Response.json({ tiles: [], parks: [] })),
@@ -507,33 +507,39 @@ describe("MapWorkspace", () => {
     await addContribution(user, "Filter", "nearby-parks/distance");
     await addContribution(user, "Heatmap", "nearby-parks/influence");
 
-    const clearFiltersButton = screen.getByRole("button", {
-      name: "Clear all filters",
+    const resetAllButton = screen.getByRole("button", {
+      name: "RESET ALL",
     });
-    await user.click(clearFiltersButton);
+    await user.click(resetAllButton);
     expect(
-      screen.getByRole("dialog", { name: "Clear all filters?" }),
+      screen.getByRole("dialog", {
+        name: "Reset all filters and heatmaps?",
+      }),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1");
+    expect(
+      screen.getByRole("button", { name: "Remove Park distance" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove Park influence" }),
+    ).toBeInTheDocument();
 
-    await user.click(clearFiltersButton);
-    await user.click(screen.getByRole("button", { name: "Clear filters" }));
+    await user.click(resetAllButton);
+    await user.click(screen.getByRole("button", { name: "Reset all" }));
 
     expect(
       screen.getByRole("button", { name: "Redefine Area of Interest" }),
     ).toBeEnabled();
     expect(screen.getByText("No active filters")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Remove Park influence" }),
-    ).toBeInTheDocument();
-    expect(clearFiltersButton).toBeDisabled();
-
-    await user.click(
-      screen.getByRole("button", { name: "Clear all heatmaps" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Clear heatmaps" }));
     expect(screen.getByText("No active heatmaps")).toBeInTheDocument();
+    expect(resetAllButton).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "Clear all filters" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Clear all heatmaps" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps the current area active until a redefined area is valid", async () => {
@@ -923,6 +929,54 @@ describe("MapWorkspace", () => {
       expect(
         map.getSource("filter-owned-regions-source")?.data.features,
       ).toHaveLength(1),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows and hides a heatmap without reloading its data", async () => {
+    let resolveRequest: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveRequest = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await screen.findByText("Centered near you");
+    await drawArea(user);
+    await addContribution(user, "Heatmap", "nearby-parks/influence");
+
+    const toggle = screen.getByRole("switch", {
+      name: "Park influence visible",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("Off")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("map-active-summary")).not.toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveRequest?.(Response.json({ tiles: [], parks: [] }));
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("Loading")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByTestId("map-active-summary")).toHaveTextContent(
+      "Park influence",
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });

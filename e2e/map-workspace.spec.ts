@@ -87,12 +87,13 @@ test("starts with the bundled data contributions", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Area of interest" }),
   ).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "RESET ALL" })).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "Clear all filters" }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
   await expect(
     page.getByRole("button", { name: "Clear all heatmaps" }),
-  ).toBeDisabled();
+  ).toHaveCount(0);
   await expect
     .poll(() =>
       page.evaluate(() =>

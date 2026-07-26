@@ -598,14 +598,15 @@ export default function MapWorkspace() {
   >(lastLocationRef.current ? "cached" : "locating");
   const [drawMode, setDrawMode] = useState<"select" | "rectangle">("select");
   const [areaOfInterest, setAreaOfInterest] = useState<Feature<Polygon>>();
-  const [clearConfirmation, setClearConfirmation] = useState<
-    "filters" | "heatmaps"
-  >();
+  const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
   const [enabledFilterIds, setEnabledFilterIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [activeHeatmaps, setActiveHeatmaps] = useState<ActiveHeatmap[]>([]);
+  const [enabledHeatmapIds, setEnabledHeatmapIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [filterRuntime, setFilterRuntime] = useState<
     Record<string, FilterRuntime>
   >({});
@@ -780,7 +781,7 @@ export default function MapWorkspace() {
               ]);
               restoringAreaRef.current = false;
               setDrawError(
-                "Use RESET WORKSPACE to remove the Area of Interest.",
+                "Draw a replacement to change the current Area of Interest.",
               );
             }
             return;
@@ -1052,6 +1053,13 @@ export default function MapWorkspace() {
       ),
     [activeFilters, enabledFilterIds],
   );
+  const enabledHeatmaps = useMemo(
+    () =>
+      activeHeatmaps.filter(({ instanceId }) =>
+        enabledHeatmapIds.has(instanceId),
+      ),
+    [activeHeatmaps, enabledHeatmapIds],
+  );
   const regionFilters = useMemo(
     () =>
       enabledFilters.filter(
@@ -1262,10 +1270,32 @@ export default function MapWorkspace() {
           beforeId,
         );
       }
+      const visibility = enabledHeatmapIds.has(instanceId)
+        ? "visible"
+        : "none";
+      for (const renderedLayerId of [
+        layerId,
+        pointLayerId,
+        surfaceLayerId,
+      ]) {
+        if (map.getLayer(renderedLayerId)) {
+          map.setLayoutProperty(
+            renderedLayerId,
+            "visibility",
+            visibility,
+          );
+        }
+      }
 
       renderedLayerKeysRef.current.add(instanceId);
     }
-  }, [activeHeatmaps, groupedPoints, mapReady, surfaceCollections]);
+  }, [
+    activeHeatmaps,
+    enabledHeatmapIds,
+    groupedPoints,
+    mapReady,
+    surfaceCollections,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1365,16 +1395,18 @@ export default function MapWorkspace() {
     if (!entry) return;
     contributionInstanceRef.current += 1;
     const randomSeed = Math.floor(Math.random() * 2_147_483_647);
+    const instanceId = `heatmap-${contributionInstanceRef.current}`;
     setActiveHeatmaps((current) => [
       ...current,
       {
-        instanceId: `heatmap-${contributionInstanceRef.current}`,
+        instanceId,
         entry,
         state: entry.contribution.initialState,
         revision: 0,
         randomSeed,
       },
     ]);
+    setEnabledHeatmapIds((current) => new Set(current).add(instanceId));
   };
 
   const startDrawing = () => {
@@ -1547,16 +1579,14 @@ export default function MapWorkspace() {
           "Z",
         ].join(" ")
       : undefined;
-  const clearFilters = () => {
+  const resetAll = () => {
     setActiveFilters([]);
     setEnabledFilterIds(new Set());
     setFilterRuntime({});
-    setClearConfirmation(undefined);
-  };
-  const clearHeatmaps = () => {
     setActiveHeatmaps([]);
+    setEnabledHeatmapIds(new Set());
     setHeatmapRuntime({});
-    setClearConfirmation(undefined);
+    setResetConfirmationOpen(false);
   };
 
   return (
@@ -1597,7 +1627,7 @@ export default function MapWorkspace() {
       ) : null}
 
       <aside className="absolute top-4 bottom-4 left-4 z-10 flex w-96 flex-col overflow-hidden rounded-2xl border border-white/70 bg-white/95 shadow-2xl shadow-slate-900/20 backdrop-blur">
-        <header className="flex shrink-0 items-center gap-2 border-b border-slate-200/80 px-5 py-4">
+        <header className="flex shrink-0 items-center gap-2 border-b border-slate-950 bg-slate-900 px-5 py-4">
           <ToolbarButton
             label={
               areaOfInterest
@@ -1629,6 +1659,27 @@ export default function MapWorkspace() {
             onAdd={addHeatmap}
             disabled={!mapReady || !areaOfInterest}
           />
+          <button
+            aria-label="RESET ALL"
+            className="ml-auto grid size-11 place-items-center rounded-lg border border-slate-200 bg-white text-red-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 focus:ring-2 focus:ring-rose-300 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-slate-50"
+            disabled={activeFilters.length === 0 && activeHeatmaps.length === 0}
+            title="Reset all filters and heatmaps"
+            type="button"
+            onClick={() => setResetConfirmationOpen(true)}
+          >
+            <svg
+              aria-hidden="true"
+              className="size-5"
+              fill="none"
+              stroke="currentColor"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth="1.8"
+              viewBox="0 0 24 24"
+            >
+              <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+            </svg>
+          </button>
           <span className="sr-only" data-testid="area-of-interest-count">
             {areaOfInterest ? 1 : 0}
           </span>
@@ -1655,23 +1706,7 @@ export default function MapWorkspace() {
           ) : null}
 
           <section className="space-y-3" aria-labelledby="filters-heading">
-            <SectionHeading title="Filters" count={activeFilters.length}>
-              <button
-                aria-label="Clear all filters"
-                className="grid size-7 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 focus:ring-2 focus:ring-rose-300 focus:outline-none disabled:cursor-not-allowed disabled:text-slate-200 disabled:hover:bg-transparent"
-                disabled={activeFilters.length === 0}
-                title="Clear all filters"
-                type="button"
-                onClick={() => setClearConfirmation("filters")}
-              >
-                <img
-                  alt=""
-                  aria-hidden="true"
-                  className="size-4"
-                  src="/icons/trash.svg"
-                />
-              </button>
-            </SectionHeading>
+            <SectionHeading title="Filters" count={activeFilters.length} />
             {activeFilters.length === 0 ? (
               <EmptyState>No active filters</EmptyState>
             ) : (
@@ -1783,23 +1818,7 @@ export default function MapWorkspace() {
           </section>
 
           <section className="space-y-3" aria-labelledby="heatmaps-heading">
-            <SectionHeading title="Heatmaps" count={activeHeatmaps.length}>
-              <button
-                aria-label="Clear all heatmaps"
-                className="grid size-7 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 focus:ring-2 focus:ring-rose-300 focus:outline-none disabled:cursor-not-allowed disabled:text-slate-200 disabled:hover:bg-transparent"
-                disabled={activeHeatmaps.length === 0}
-                title="Clear all heatmaps"
-                type="button"
-                onClick={() => setClearConfirmation("heatmaps")}
-              >
-                <img
-                  alt=""
-                  aria-hidden="true"
-                  className="size-4"
-                  src="/icons/trash.svg"
-                />
-              </button>
-            </SectionHeading>
+            <SectionHeading title="Heatmaps" count={activeHeatmaps.length} />
             {activeHeatmaps.length === 0 ? (
               <EmptyState>No active heatmaps</EmptyState>
             ) : (
@@ -1807,10 +1826,15 @@ export default function MapWorkspace() {
                 {activeHeatmaps.map((selection) => {
                   const runtime = heatmapRuntime[selection.instanceId];
                   const Controls = selection.entry.contribution.Controls;
+                  const enabled = enabledHeatmapIds.has(selection.instanceId);
                   return (
                     <article
                       key={selection.instanceId}
-                      className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+                      className={`rounded-xl border bg-white p-3 shadow-sm transition-opacity ${
+                        enabled
+                          ? "border-slate-200"
+                          : "border-slate-200/70 opacity-70"
+                      }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <p className="min-w-0 truncate text-xs font-semibold text-slate-900">
@@ -1819,6 +1843,8 @@ export default function MapWorkspace() {
                         <div className="flex items-center gap-2">
                           <Status
                             runtime={runtime}
+                            enabled={enabled}
+                            showSettledStatus={false}
                             onRetry={() =>
                               setActiveHeatmaps((current) =>
                                 current.map((item) =>
@@ -1830,17 +1856,50 @@ export default function MapWorkspace() {
                             }
                           />
                           <button
+                            aria-checked={enabled}
+                            aria-label={`${selection.entry.contribution.name} visible`}
+                            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1 focus:outline-none ${
+                              enabled ? "bg-indigo-600" : "bg-slate-300"
+                            }`}
+                            role="switch"
+                            title={`${enabled ? "Hide" : "Show"} ${selection.entry.contribution.name}`}
+                            type="button"
+                            onClick={() =>
+                              setEnabledHeatmapIds((current) => {
+                                const next = new Set(current);
+                                if (enabled) {
+                                  next.delete(selection.instanceId);
+                                } else {
+                                  next.add(selection.instanceId);
+                                }
+                                return next;
+                              })
+                            }
+                          >
+                            <span
+                              aria-hidden="true"
+                              className={`h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                                enabled ? "translate-x-4.5" : "translate-x-0.5"
+                              }`}
+                            />
+                          </button>
+                          <button
                             aria-label={`Remove ${selection.entry.contribution.name}`}
                             className="rounded-md px-1.5 py-0.5 text-lg leading-none text-slate-300 hover:bg-slate-100 hover:text-slate-600 focus:ring-2 focus:ring-slate-300 focus:outline-none"
                             type="button"
-                            onClick={() =>
+                            onClick={() => {
                               setActiveHeatmaps((current) =>
                                 current.filter(
                                   (item) =>
                                     item.instanceId !== selection.instanceId,
                                 ),
-                              )
-                            }
+                              );
+                              setEnabledHeatmapIds((current) => {
+                                const next = new Set(current);
+                                next.delete(selection.instanceId);
+                                return next;
+                              });
+                            }}
                           >
                             ×
                           </button>
@@ -1850,7 +1909,7 @@ export default function MapWorkspace() {
                         <div className="mt-3 border-t border-slate-100 pt-3">
                           <Controls
                             value={selection.state}
-                            disabled={false}
+                            disabled={!enabled}
                             loading={runtime?.status === "loading"}
                             viewport={actionViewport}
                             onChange={(state) =>
@@ -1887,13 +1946,13 @@ export default function MapWorkspace() {
         </div>
       </aside>
 
-      {clearConfirmation ? (
+      {resetConfirmationOpen ? (
         <div
           className="absolute inset-0 z-30 grid place-items-center bg-slate-950/45 p-6 backdrop-blur-sm"
           role="presentation"
           onPointerDown={(event) => {
             if (event.target === event.currentTarget) {
-              setClearConfirmation(undefined);
+              setResetConfirmationOpen(false);
             }
           }}
         >
@@ -1908,35 +1967,29 @@ export default function MapWorkspace() {
               id="clear-contributions-title"
               className="text-base font-bold text-slate-900"
             >
-              Clear all {clearConfirmation}?
+              Reset all filters and heatmaps?
             </h2>
             <p
               id="clear-contributions-description"
               className="mt-2 text-sm leading-5 text-slate-600"
             >
-              This removes every configured {clearConfirmation} item from the
-              map. Your Area of Interest and{" "}
-              {clearConfirmation === "filters" ? "heatmaps" : "filters"} will
-              stay in place.
+              This removes every configured filter and heatmap from the map.
+              Your Area of Interest will stay in place.
             </p>
             <div className="mt-5 flex justify-end gap-2">
               <button
                 className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-slate-300 focus:outline-none"
                 type="button"
-                onClick={() => setClearConfirmation(undefined)}
+                onClick={() => setResetConfirmationOpen(false)}
               >
                 Cancel
               </button>
               <button
                 className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 focus:ring-2 focus:ring-rose-300 focus:outline-none"
                 type="button"
-                onClick={
-                  clearConfirmation === "filters"
-                    ? clearFilters
-                    : clearHeatmaps
-                }
+                onClick={resetAll}
               >
-                Clear {clearConfirmation}
+                Reset all
               </button>
             </div>
           </div>
@@ -1971,7 +2024,7 @@ export default function MapWorkspace() {
             {drawError}
           </TransientSnack>
         ) : null}
-        {enabledFilters.length || activeHeatmaps.length ? (
+        {enabledFilters.length || enabledHeatmaps.length ? (
           <div
             className="flex flex-col items-end gap-2"
             data-testid="map-active-summary"
@@ -1986,7 +2039,7 @@ export default function MapWorkspace() {
                 {enabledFilters.length === 1 ? "filter" : "filters"}
               </TransientSnack>
             ) : null}
-            {activeHeatmaps.map(({ entry, instanceId }) => (
+            {enabledHeatmaps.map(({ entry, instanceId }) => (
               <TransientSnack
                 key={instanceId}
                 resetKey={`${heatmapRuntime[instanceId]?.status ?? "pending"}:${heatmapRuntime[instanceId]?.itemCount ?? 0}`}

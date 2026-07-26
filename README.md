@@ -129,9 +129,11 @@ tab. The action is disabled until an Area of Interest exists.
   rectangle. It cannot be more than 50 miles across in either
   dimension.
 - **Redefine area** lets you draw and validate a replacement while the current
-  area, filters, and heatmaps remain active. **RESET WORKSPACE** removes the
-  area along with every configured filter and heatmap after confirmation.
+  area, filters, and heatmaps remain active. **RESET ALL** removes every
+  configured filter and heatmap after confirmation while preserving the area.
 - Active extension filters combine with AND semantics.
+- Filters and heatmaps can each be toggled off without discarding their
+  configuration or reloading their data.
 - Region-producing filters add a host-rendered, non-editable result boundary.
   Their regions are unioned within each filter and intersected across filters,
   so the map shows only the common area.
