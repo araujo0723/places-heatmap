@@ -50,6 +50,10 @@ export interface ContributionContext {
   randomSeed: number;
 }
 
+export interface HeatmapContributionContext extends ContributionContext {
+  regions: FeatureCollection<RegionGeometry>;
+}
+
 export interface ControlProps<State> {
   value: State;
   onChange: (value: State) => void;
@@ -107,7 +111,7 @@ export interface PointHeatmapContribution<State = unknown>
   kind?: "points";
   load: (
     state: State,
-    context: ContributionContext,
+    context: HeatmapContributionContext,
   ) => Promise<FeatureCollection<Point>>;
 }
 
@@ -125,7 +129,7 @@ export interface SurfaceHeatmapContribution<State = unknown>
   kind: "surface";
   load: (
     state: State,
-    context: ContributionContext,
+    context: HeatmapContributionContext,
   ) => Promise<SurfaceHeatmapData>;
 }
 

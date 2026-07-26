@@ -134,7 +134,17 @@ vi.mock("maplibre-gl", () => {
       this.layers.delete(id);
     }
     stop() {}
-    fitBounds() {}
+    fitBounds = vi.fn(
+      (
+        bounds: [[number, number], [number, number]],
+        _options: unknown,
+      ) => {
+        this.center = {
+          lng: (bounds[0][0] + bounds[1][0]) / 2,
+          lat: (bounds[0][1] + bounds[1][1]) / 2,
+        };
+      },
+    );
     remove() {}
   }
 
@@ -210,6 +220,7 @@ const contributionLabels: Record<string, string> = {
   "nearby-parks/influence": "Parks",
   "nearby-water/influence": "Lakes",
   "commute/travel-time": "Commute",
+  "zillow/preview": "Preview",
   "test/reject-all": "Reject all",
   "test/points": "Test points",
 };
@@ -295,12 +306,18 @@ describe("MapWorkspace", () => {
 
     const map = (
       MapLibreMap as unknown as {
-        lastInstance: { jumpTo: ReturnType<typeof vi.fn> };
+        lastInstance: { fitBounds: ReturnType<typeof vi.fn> };
       }
     ).lastInstance;
-    expect(map.jumpTo).toHaveBeenLastCalledWith({
-      center: [-84.388, 33.749],
-      zoom: 10,
+    const [bounds, options] = map.fitBounds.mock.calls.at(-1) as [
+      [[number, number], [number, number]],
+      unknown,
+    ];
+    expect((bounds[0][0] + bounds[1][0]) / 2).toBeCloseTo(-84.388);
+    expect((bounds[0][1] + bounds[1][1]) / 2).toBeCloseTo(33.749);
+    expect(bounds[1][1] - bounds[0][1]).toBeCloseTo(0.521, 2);
+    expect(options).toEqual({
+      duration: 0,
     });
     expect(
       JSON.parse(
@@ -392,6 +409,47 @@ describe("MapWorkspace", () => {
       screen.queryByText("Define an Area of Interest first."),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/demo-places/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the Zillow Preview as a simplified dark blue surface", async () => {
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await drawArea(user);
+    await addContribution(user, "Heatmap", "zillow/preview");
+
+    const map = (
+      MapLibreMap as unknown as {
+        lastInstance: {
+          getLayer(id: string): unknown;
+          getSource(id: string): { data: FeatureCollection } | undefined;
+        };
+      }
+    ).lastInstance;
+    await waitFor(() =>
+      expect(
+        map.getSource("extension-source-heatmap-1")?.data.features,
+      ).toHaveLength(1),
+    );
+    expect(map.getLayer("extension-surface-heatmap-1")).toMatchObject({
+      type: "fill",
+      paint: {
+        "fill-color": [
+          "interpolate",
+          ["linear"],
+          ["get", "weight"],
+          0,
+          "#172554",
+          1,
+          "#172554",
+        ],
+        "fill-opacity": 0.62,
+      },
+    });
+    expect(
+      map.getSource("extension-source-heatmap-1")?.data.features[0]
+        .geometry.type,
+    ).toBe("Polygon");
   });
 
   it("confirms RESET ALL and preserves the Area of Interest", async () => {
@@ -1193,7 +1251,7 @@ describe("MapWorkspace", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("uses the same wider zoom for saved and newly located positions", async () => {
+  it("fits the Area of Interest with vertical padding for saved and newly located positions", async () => {
     localStorage.setItem(
       "places-heatmap:last-location",
       JSON.stringify({ longitude: 2.3522, latitude: 48.8566 }),
@@ -1219,17 +1277,30 @@ describe("MapWorkspace", () => {
     const map = (
       MapLibreMap as unknown as {
         lastInstance: {
-          jumpTo: ReturnType<typeof vi.fn>;
+          fitBounds: ReturnType<typeof vi.fn>;
           getZoom(): number;
           setPadding: ReturnType<typeof vi.fn>;
         };
       }
     ).lastInstance;
-    expect(map.jumpTo).toHaveBeenCalledWith({
-      center: [-0.115, 51.512],
-      zoom: 10,
+    expect(map.fitBounds).toHaveBeenCalledTimes(2);
+    const [locatedBounds, fitOptions] = map.fitBounds.mock.calls[1] as [
+      [[number, number], [number, number]],
+      unknown,
+    ];
+    expect(
+      (locatedBounds[0][0] + locatedBounds[1][0]) / 2,
+    ).toBeCloseTo(-0.115);
+    expect(
+      (locatedBounds[0][1] + locatedBounds[1][1]) / 2,
+    ).toBeCloseTo(51.512);
+    expect(locatedBounds[1][1] - locatedBounds[0][1]).toBeCloseTo(
+      0.521,
+      2,
+    );
+    expect(fitOptions).toEqual({
+      duration: 0,
     });
-    expect(map.getZoom()).toBe(10);
     expect(map.setPadding).toHaveBeenCalledWith({
       top: 0,
       right: 0,
@@ -1243,7 +1314,7 @@ describe("MapWorkspace", () => {
     ).toEqual({ longitude: -0.115, latitude: 51.512 });
   });
 
-  it("does not recenter when geolocation matches the saved location", async () => {
+  it("does not refit when geolocation matches the saved location", async () => {
     localStorage.setItem(
       "places-heatmap:last-location",
       JSON.stringify({ longitude: -0.115, latitude: 51.512 }),
@@ -1255,12 +1326,10 @@ describe("MapWorkspace", () => {
     const map = (
       MapLibreMap as unknown as {
         lastInstance: {
-          jumpTo: ReturnType<typeof vi.fn>;
-          getZoom(): number;
+          fitBounds: ReturnType<typeof vi.fn>;
         };
       }
     ).lastInstance;
-    expect(map.jumpTo).not.toHaveBeenCalled();
-    expect(map.getZoom()).toBe(10);
+    expect(map.fitBounds).toHaveBeenCalledTimes(1);
   });
 });

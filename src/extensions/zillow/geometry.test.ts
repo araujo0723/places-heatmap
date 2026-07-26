@@ -4,6 +4,7 @@ import type { RegionGeometry } from "../api";
 import {
   preparePolygonsForZillow,
   regionPolygons,
+  zillowPreviewSurface,
   ZILLOW_MAX_POLYGONS,
   ZILLOW_MAX_POINTS_PER_POLYGON,
   ZILLOW_MAX_TOTAL_POINTS,
@@ -97,5 +98,26 @@ describe("Zillow region geometry", () => {
     } satisfies FeatureCollection<RegionGeometry>;
 
     expect(regionPolygons(collection)).toHaveLength(3);
+  });
+
+  it("builds a weighted preview from the Zillow-simplified polygons", () => {
+    const collection = {
+      type: "FeatureCollection",
+      features: [
+        polygon([detailedCircle([-84.25, 33.98], 0.03, 1_000)]),
+      ],
+    } satisfies FeatureCollection<RegionGeometry>;
+
+    const preview = zillowPreviewSurface(collection);
+    const feature = preview.collection.features[0];
+
+    expect(preview.itemCount).toBe(1);
+    expect(feature.properties.weight).toBe(1);
+    expect(feature.geometry.type).toBe("Polygon");
+    if (feature.geometry.type === "Polygon") {
+      expect(feature.geometry.coordinates[0].length).toBeLessThanOrEqual(
+        ZILLOW_MAX_POINTS_PER_POLYGON,
+      );
+    }
   });
 });

@@ -1,5 +1,9 @@
-import type { FeatureCollection } from "geojson";
-import type { RegionGeometry } from "../api";
+import type { FeatureCollection, Polygon } from "geojson";
+import type {
+  RegionGeometry,
+  SurfaceHeatmapData,
+  SurfaceProperties,
+} from "../api";
 
 export type ZillowCoordinate = [number, number];
 export type ZillowPolygon = ZillowCoordinate[];
@@ -302,4 +306,28 @@ export function regionPolygons(
       : geometry.coordinates.map((polygon) => polygon[0]),
   ) as ZillowPolygon[];
   return preparePolygonsForZillow(polygons);
+}
+
+export function zillowPreviewSurface(
+  collection: FeatureCollection<RegionGeometry>,
+): SurfaceHeatmapData {
+  const features = regionPolygons(collection).map(
+    (coordinates, index) => ({
+      type: "Feature" as const,
+      id: `zillow-preview-${index}`,
+      properties: { weight: 1 } satisfies SurfaceProperties,
+      geometry: {
+        type: "Polygon" as const,
+        coordinates: [coordinates],
+      } satisfies Polygon,
+    }),
+  );
+
+  return {
+    collection: {
+      type: "FeatureCollection",
+      features,
+    },
+    itemCount: features.length,
+  };
 }

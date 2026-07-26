@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { ActionControlProps } from "../api";
 import { defineExtension } from "../api";
-import { regionPolygons } from "./geometry";
+import { regionPolygons, zillowPreviewSurface } from "./geometry";
 import { buildZillowRentalUrl, getBoundsForPolygons } from "./zillow";
 
 function ZillowControls({ disabled, regions }: ActionControlProps) {
@@ -83,6 +83,23 @@ export default defineExtension({
       id: "go-to-zillow",
       name: "Go to Zillow",
       Controls: ZillowControls,
+    },
+  ],
+  heatmaps: [
+    {
+      kind: "surface",
+      id: "preview",
+      name: "Preview",
+      initialState: {},
+      load: async (_state, context) =>
+        zillowPreviewSurface(context.regions),
+      style: {
+        opacity: 0.62,
+        colorRamp: [
+          [0, "#172554"],
+          [1, "#172554"],
+        ],
+      },
     },
   ],
 });

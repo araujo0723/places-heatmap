@@ -84,6 +84,7 @@ const DEFAULT_ATTRIBUTION = "© OpenStreetMap contributors";
 const LAST_LOCATION_KEY = "places-heatmap:last-location";
 const INITIAL_ZOOM = 10;
 const AREA_OF_INTEREST_RADIUS_MILES = 15;
+const AREA_OF_INTEREST_VERTICAL_PADDING_MILES = 3;
 const EARTH_RADIUS_MILES = 3_958.7613;
 const MAP_PADDING = { top: 0, right: 0, bottom: 0, left: 400 } as const;
 const SAME_LOCATION_THRESHOLD_METERS = 25;
@@ -155,6 +156,31 @@ function areaAroundOrigin(
       ],
     },
   };
+}
+
+function fitAreaOfInterest(
+  map: MapLibreMap,
+  areaOfInterest: Feature<Polygon>,
+) {
+  const { bounds } = regionViewport(areaOfInterest);
+  const latitudePadding =
+    (AREA_OF_INTEREST_VERTICAL_PADDING_MILES / EARTH_RADIUS_MILES) *
+    (180 / Math.PI);
+  map.fitBounds(
+    [
+      [
+        bounds.west,
+        Math.max(-85.051129, bounds.south - latitudePadding),
+      ],
+      [
+        bounds.east,
+        Math.min(85.051129, bounds.north + latitudePadding),
+      ],
+    ],
+    {
+      duration: 0,
+    },
+  );
 }
 
 function readLastLocation(): [number, number] | undefined {
@@ -877,11 +903,9 @@ export default function MapWorkspace() {
     }
     lastLocationRef.current = center;
     saveLastLocation(...center);
-    setAreaOfInterest(areaAroundOrigin(center));
-    mapRef.current?.jumpTo({
-      center,
-      zoom: INITIAL_ZOOM,
-    });
+    const nextAreaOfInterest = areaAroundOrigin(center);
+    setAreaOfInterest(nextAreaOfInterest);
+    if (mapRef.current) fitAreaOfInterest(mapRef.current, nextAreaOfInterest);
   }
 
   useEffect(() => {
@@ -940,10 +964,7 @@ export default function MapWorkspace() {
         if (locationsAreEquivalent(lastLocationRef.current, nextLocation)) {
           return;
         }
-        map.jumpTo({
-          center: nextLocation,
-          zoom: INITIAL_ZOOM,
-        });
+        fitAreaOfInterest(map, areaAroundOrigin(nextLocation));
       };
       geolocate.on("geolocate", (event) => {
         const position = event as unknown as Partial<GeolocationPosition>;
@@ -974,6 +995,9 @@ export default function MapWorkspace() {
 
       const onLoad = () => {
         setMapReady(true);
+        if (lastLocation) {
+          fitAreaOfInterest(map, areaAroundOrigin(lastLocation));
+        }
         if (!lastLocation) setLocationStatus("locating");
         geolocate.trigger();
       };
@@ -1124,86 +1148,6 @@ export default function MapWorkspace() {
     return () => controller.abort();
   }, [activeFilters, areaOfInterest]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    if (!areaOfInterest) {
-      setHeatmapRuntime({});
-      return () => controller.abort();
-    }
-    const activeKeys = new Set(
-      activeHeatmaps.map(({ instanceId }) => instanceId),
-    );
-
-    setHeatmapRuntime((current) =>
-      Object.fromEntries(
-        activeHeatmaps.map(({ instanceId }) => [
-          instanceId,
-          {
-            ...current[instanceId],
-            status: "loading" as const,
-            error: undefined,
-          },
-        ]),
-      ),
-    );
-
-    for (const selection of activeHeatmaps) {
-      const contribution = selection.entry.contribution;
-      const context = {
-        signal: controller.signal,
-        viewport: regionViewport(areaOfInterest),
-        randomSeed: selection.randomSeed,
-      };
-      const load =
-        contribution.kind === "surface"
-          ? contribution
-              .load(selection.state, context)
-              .then(normalizeSurfaceHeatmap)
-              .then(({ collection: surface, itemCount }) => ({
-                surface,
-                itemCount,
-              }))
-          : contribution
-              .load(selection.state, context)
-              .then((collection) => ({
-                points: normalizeHeatmapFeatures(
-                  collection,
-                  {
-                    extensionId: selection.entry.extension.id,
-                    contributionId: contribution.id,
-                  },
-                  contribution.style,
-                ),
-                itemCount: collection.features.length,
-              }));
-      load
-        .then((result) => {
-          if (
-            controller.signal.aborted ||
-            !activeKeys.has(selection.instanceId)
-          )
-            return;
-          setHeatmapRuntime((current) => ({
-            ...current,
-            [selection.instanceId]: { status: "ready", ...result },
-          }));
-        })
-        .catch((error) => {
-          if (controller.signal.aborted) return;
-          setHeatmapRuntime((current) => ({
-            ...current,
-            [selection.instanceId]: {
-              ...current[selection.instanceId],
-              status: "error",
-              error: errorMessage(error),
-            },
-          }));
-        });
-    }
-
-    return () => controller.abort();
-  }, [activeHeatmaps, areaOfInterest]);
-
   const enabledFilters = useMemo(
     () =>
       activeFilters.filter(({ instanceId }) =>
@@ -1283,6 +1227,87 @@ export default function MapWorkspace() {
         );
       },
     );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    if (!areaOfInterest) {
+      setHeatmapRuntime({});
+      return () => controller.abort();
+    }
+    const activeKeys = new Set(
+      activeHeatmaps.map(({ instanceId }) => instanceId),
+    );
+
+    setHeatmapRuntime((current) =>
+      Object.fromEntries(
+        activeHeatmaps.map(({ instanceId }) => [
+          instanceId,
+          {
+            ...current[instanceId],
+            status: "loading" as const,
+            error: undefined,
+          },
+        ]),
+      ),
+    );
+
+    for (const selection of activeHeatmaps) {
+      const contribution = selection.entry.contribution;
+      const context = {
+        signal: controller.signal,
+        viewport: regionViewport(areaOfInterest),
+        randomSeed: selection.randomSeed,
+        regions: actionRegions,
+      };
+      const load =
+        contribution.kind === "surface"
+          ? contribution
+              .load(selection.state, context)
+              .then(normalizeSurfaceHeatmap)
+              .then(({ collection: surface, itemCount }) => ({
+                surface,
+                itemCount,
+              }))
+          : contribution
+              .load(selection.state, context)
+              .then((collection) => ({
+                points: normalizeHeatmapFeatures(
+                  collection,
+                  {
+                    extensionId: selection.entry.extension.id,
+                    contributionId: contribution.id,
+                  },
+                  contribution.style,
+                ),
+                itemCount: collection.features.length,
+              }));
+      load
+        .then((result) => {
+          if (
+            controller.signal.aborted ||
+            !activeKeys.has(selection.instanceId)
+          )
+            return;
+          setHeatmapRuntime((current) => ({
+            ...current,
+            [selection.instanceId]: { status: "ready", ...result },
+          }));
+        })
+        .catch((error) => {
+          if (controller.signal.aborted) return;
+          setHeatmapRuntime((current) => ({
+            ...current,
+            [selection.instanceId]: {
+              ...current[selection.instanceId],
+              status: "error",
+              error: errorMessage(error),
+            },
+          }));
+        });
+    }
+
+    return () => controller.abort();
+  }, [activeHeatmaps, actionRegions, areaOfInterest]);
 
   const groupedPoints = useMemo(() => {
     const groups = new Map<string, FeatureCollection<Point>>();
@@ -1587,7 +1612,7 @@ export default function MapWorkspace() {
         aria-label="Interactive places map"
       />
 
-      <aside className="absolute top-4 bottom-4 left-4 z-10 flex w-96 flex-col overflow-hidden rounded-2xl border border-white/70 bg-white/95 shadow-2xl shadow-slate-900/20 backdrop-blur">
+      <aside className="absolute top-4 bottom-4 left-4 z-10 flex w-96 flex-col overflow-hidden rounded-2xl bg-white/95 shadow-[0_24px_55px_-16px_rgba(15,23,42,0.5),0_8px_20px_-10px_rgba(15,23,42,0.35)] backdrop-blur">
         <header className="flex shrink-0 items-center gap-2 border-b border-slate-950 bg-slate-900 px-5 py-4">
           <ToolbarButton
             label="Set origin"
