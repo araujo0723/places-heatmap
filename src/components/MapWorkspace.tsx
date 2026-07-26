@@ -97,6 +97,7 @@ const DEFAULT_ATTRIBUTION = "© OpenStreetMap contributors";
 const LAST_LOCATION_KEY = "places-heatmap:last-location";
 const AUTO_CENTER_ZOOM = 11.3;
 const SAME_LOCATION_THRESHOLD_METERS = 25;
+const SNACK_DURATION_MS = 5_000;
 const EMPTY_COLLECTION: FeatureCollection<Point> = {
   type: "FeatureCollection",
   features: [],
@@ -180,6 +181,43 @@ function locationsAreEquivalent(
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : "An unknown error occurred.";
+}
+
+function TransientSnack({
+  children,
+  resetKey,
+  role,
+  testId,
+  className = "",
+}: {
+  children: ReactNode;
+  resetKey: string | number;
+  role?: "alert";
+  testId?: string;
+  className?: string;
+}) {
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    setVisible(true);
+    const timeout = window.setTimeout(
+      () => setVisible(false),
+      SNACK_DURATION_MS,
+    );
+    return () => window.clearTimeout(timeout);
+  }, [resetKey]);
+
+  if (!visible) return null;
+
+  return (
+    <div
+      className={`rounded-lg bg-slate-950 px-3 py-2 text-xs font-medium text-white shadow-lg shadow-slate-950/25 ${className}`}
+      data-testid={testId}
+      role={role}
+    >
+      {children}
+    </div>
+  );
 }
 
 function normalizeResolvedRegions(value: unknown) {
@@ -1410,6 +1448,14 @@ export default function MapWorkspace() {
   };
   const drawStart = drawDraft[0];
   const drawEnd = drawDraft[1];
+  const locationMessage =
+    locationStatus === "located"
+      ? "Centered near you"
+      : locationStatus === "cached"
+        ? "Centered at your last known location"
+        : locationStatus === "unavailable"
+          ? "Location unavailable — use the target button to retry"
+          : "Finding your location…";
   const drawPreviewPath =
     drawStart && drawEnd
       ? [
@@ -1802,34 +1848,28 @@ export default function MapWorkspace() {
         aria-live="polite"
       >
         {!mapReady ? (
-          <div className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-medium text-white shadow-lg shadow-slate-950/25">
+          <TransientSnack resetKey={mapError ?? "loading"}>
             {mapError ? `Map failed: ${mapError}` : "Loading map…"}
-          </div>
+          </TransientSnack>
         ) : null}
-        <div
-          className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-medium text-white shadow-lg shadow-slate-950/25"
-          data-testid="location-status"
+        <TransientSnack
+          resetKey={locationStatus}
+          testId="location-status"
         >
-          {locationStatus === "located"
-            ? "Centered near you"
-            : locationStatus === "cached"
-              ? "Centered at your last known location"
-              : locationStatus === "unavailable"
-                ? "Location unavailable — use the target button to retry"
-                : "Finding your location…"}
-        </div>
+          {locationMessage}
+        </TransientSnack>
         {mapError && mapReady ? (
-          <div className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-medium text-white shadow-lg shadow-slate-950/25">
+          <TransientSnack resetKey={mapError}>
             Base map warning: {mapError}
-          </div>
+          </TransientSnack>
         ) : null}
         {drawError ? (
-          <div
-            className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-medium text-white shadow-lg shadow-slate-950/25"
+          <TransientSnack
+            resetKey={drawError}
             role="alert"
           >
             {drawError}
-          </div>
+          </TransientSnack>
         ) : null}
         {activeFilters.length || activeHeatmaps.length ? (
           <div
@@ -1837,15 +1877,20 @@ export default function MapWorkspace() {
             data-testid="map-active-summary"
           >
             {activeFilters.length ? (
-              <div className="rounded-lg bg-slate-950 px-3 py-2 text-xs font-medium text-white shadow-lg shadow-slate-950/25">
+              <TransientSnack
+                resetKey={activeFilters
+                  .map(({ instanceId }) => instanceId)
+                  .join(",")}
+              >
                 {activeFilters.length} active{" "}
                 {activeFilters.length === 1 ? "filter" : "filters"}
-              </div>
+              </TransientSnack>
             ) : null}
             {activeHeatmaps.map(({ entry, instanceId }) => (
-              <div
+              <TransientSnack
                 key={instanceId}
-                className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-3 py-2 text-xs font-medium text-white shadow-lg shadow-slate-950/25"
+                resetKey={`${heatmapRuntime[instanceId]?.status ?? "pending"}:${heatmapRuntime[instanceId]?.itemCount ?? 0}`}
+                className="inline-flex items-center gap-2"
               >
                 <span className="h-2 w-2 rounded-full bg-green-500" />
                 {entry.contribution.name}
@@ -1854,7 +1899,7 @@ export default function MapWorkspace() {
                     ? (heatmapRuntime[instanceId]?.itemCount ?? 0)
                     : (groupedPoints.get(instanceId)?.features.length ?? 0)}
                 </span>
-              </div>
+              </TransientSnack>
             ))}
           </div>
         ) : null}

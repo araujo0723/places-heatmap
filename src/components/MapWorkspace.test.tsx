@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { FeatureCollection } from "geojson";
 import { vi } from "vitest";
@@ -263,7 +263,32 @@ describe("MapWorkspace", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("dismisses snack notifications after five seconds", async () => {
+    vi.useFakeTimers();
+    render(<MapWorkspace />);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("location-status")).toHaveTextContent(
+      "Centered near you",
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(4_999);
+    });
+    expect(screen.getByTestId("location-status")).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(screen.queryByTestId("location-status")).not.toBeInTheDocument();
   });
 
   it(
