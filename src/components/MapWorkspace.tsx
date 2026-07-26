@@ -30,6 +30,16 @@ import {
   searchAddresses,
   type AddressSelection,
 } from "../core/address-search";
+import {
+  createSavedMap,
+  loadSavedMap,
+  updateSavedMap,
+} from "../core/saved-maps-client";
+import {
+  SAVED_MAP_VERSION,
+  type SavedMapContribution,
+  type SavedMapState,
+} from "../core/saved-map";
 import type {
   HostedPoint,
   MapViewport,
@@ -89,6 +99,7 @@ const EARTH_RADIUS_MILES = 3_958.7613;
 const MAP_PADDING = { top: 0, right: 0, bottom: 0, left: 400 } as const;
 const SAME_LOCATION_THRESHOLD_METERS = 25;
 const SNACK_DURATION_MS = 5_000;
+const SAVE_DEBOUNCE_MS = 300;
 const EMPTY_COLLECTION: FeatureCollection<Point> = {
   type: "FeatureCollection",
   features: [],
@@ -213,6 +224,20 @@ function saveLastLocation(longitude: number, latitude: number) {
   } catch {
     // Location still works when browser storage is unavailable.
   }
+}
+
+function readSavedMapId() {
+  try {
+    return new URL(window.location.href).searchParams.get("map") || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function updateSavedMapUrl(id: string) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("map", id);
+  window.history.replaceState(window.history.state, "", url);
 }
 
 function locationsAreEquivalent(
@@ -831,13 +856,38 @@ export default function MapWorkspace() {
   const mapRef = useRef<MapLibreMap | null>(null);
   const renderedLayerKeysRef = useRef(new Set<string>());
   const contributionInstanceRef = useRef(0);
-  const lastLocationRef = useRef(readLastLocation());
+  const initialSavedMapIdRef = useRef(readSavedMapId());
+  const lastLocationRef = useRef(
+    initialSavedMapIdRef.current ? undefined : readLastLocation(),
+  );
+  const loadedSavedOriginRef = useRef<[number, number] | undefined>(undefined);
+  const unknownSavedFiltersRef = useRef<SavedMapContribution[]>([]);
+  const unknownSavedHeatmapsRef = useRef<SavedMapContribution[]>([]);
+  const savedMapIdRef = useRef(initialSavedMapIdRef.current);
+  const pendingSaveRef = useRef<
+    { state: SavedMapState; serialized: string } | undefined
+  >(undefined);
+  const saveInProgressRef = useRef(false);
+  const lastSavedSnapshotRef = useRef<string | undefined>(undefined);
+  const skipNextSaveRef = useRef(Boolean(initialSavedMapIdRef.current));
+  const mountedRef = useRef(true);
 
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string>();
   const [locationStatus, setLocationStatus] = useState<
-    "cached" | "locating" | "located" | "unavailable"
-  >(lastLocationRef.current ? "cached" : "locating");
+    | "cached"
+    | "locating"
+    | "located"
+    | "loading-saved"
+    | "saved"
+    | "unavailable"
+  >(
+    initialSavedMapIdRef.current
+      ? "loading-saved"
+      : lastLocationRef.current
+        ? "cached"
+        : "locating",
+  );
   const [areaOfInterest, setAreaOfInterest] = useState<
     Feature<Polygon> | undefined
   >(() =>
@@ -861,6 +911,17 @@ export default function MapWorkspace() {
   const [heatmapRuntime, setHeatmapRuntime] = useState<
     Record<string, HeatmapRuntime>
   >({});
+  const [configurationReady, setConfigurationReady] = useState(
+    !initialSavedMapIdRef.current,
+  );
+  const [persistenceError, setPersistenceError] = useState<string>();
+
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    [],
+  );
 
   const currentViewport = (): MapViewport => {
     const map = mapRef.current;
@@ -907,6 +968,109 @@ export default function MapWorkspace() {
     setAreaOfInterest(nextAreaOfInterest);
     if (mapRef.current) fitAreaOfInterest(mapRef.current, nextAreaOfInterest);
   }
+
+  useEffect(() => {
+    const id = initialSavedMapIdRef.current;
+    if (!id) return;
+
+    const controller = new AbortController();
+    loadSavedMap(id, controller.signal)
+      .then(({ state }) => {
+        if (controller.signal.aborted) return;
+        const knownFilters: ActiveFilter[] = [];
+        const knownHeatmaps: ActiveHeatmap[] = [];
+        const enabledFilters = new Set<string>();
+        const enabledHeatmaps = new Set<string>();
+        const unknownFilters: SavedMapContribution[] = [];
+        const unknownHeatmaps: SavedMapContribution[] = [];
+        let largestInstanceNumber = 0;
+
+        for (const saved of [...state.filters, ...state.heatmaps]) {
+          const numericSuffix = Number(saved.instanceId.match(/-(\d+)$/)?.[1]);
+          if (Number.isSafeInteger(numericSuffix)) {
+            largestInstanceNumber = Math.max(
+              largestInstanceNumber,
+              numericSuffix,
+            );
+          }
+        }
+        contributionInstanceRef.current = largestInstanceNumber;
+
+        for (const saved of state.filters) {
+          const entry = extensionRegistry.filters.find(
+            (candidate) => candidate.key === saved.contribution,
+          );
+          if (!entry) {
+            unknownFilters.push(saved);
+            continue;
+          }
+          knownFilters.push({
+            instanceId: saved.instanceId,
+            entry,
+            state: saved.parameters,
+            revision: 0,
+            randomSeed: saved.randomSeed,
+          });
+          if (saved.enabled) enabledFilters.add(saved.instanceId);
+        }
+
+        for (const saved of state.heatmaps) {
+          const entry = extensionRegistry.heatmaps.find(
+            (candidate) => candidate.key === saved.contribution,
+          );
+          if (!entry) {
+            unknownHeatmaps.push(saved);
+            continue;
+          }
+          knownHeatmaps.push({
+            instanceId: saved.instanceId,
+            entry,
+            state: saved.parameters,
+            revision: 0,
+            randomSeed: saved.randomSeed,
+          });
+          if (saved.enabled) enabledHeatmaps.add(saved.instanceId);
+        }
+
+        unknownSavedFiltersRef.current = unknownFilters;
+        unknownSavedHeatmapsRef.current = unknownHeatmaps;
+        setActiveFilters(knownFilters);
+        setEnabledFilterIds(enabledFilters);
+        setActiveHeatmaps(knownHeatmaps);
+        setEnabledHeatmapIds(enabledHeatmaps);
+
+        const location = state.startingLocation;
+        if (location) {
+          const center: [number, number] = [
+            location.longitude,
+            location.latitude,
+          ];
+          loadedSavedOriginRef.current = center;
+          lastLocationRef.current = center;
+          saveLastLocation(...center);
+          const nextArea = areaAroundOrigin(center);
+          setAreaOfInterest(nextArea);
+          if (mapRef.current) fitAreaOfInterest(mapRef.current, nextArea);
+          setLocationStatus("saved");
+        } else {
+          loadedSavedOriginRef.current = undefined;
+          lastLocationRef.current = undefined;
+          setAreaOfInterest(undefined);
+          setLocationStatus("unavailable");
+        }
+        setPersistenceError(undefined);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setLocationStatus(lastLocationRef.current ? "cached" : "unavailable");
+        setPersistenceError(`Could not load saved map: ${errorMessage(error)}`);
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setConfigurationReady(true);
+      });
+
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
@@ -995,6 +1159,13 @@ export default function MapWorkspace() {
 
       const onLoad = () => {
         setMapReady(true);
+        if (initialSavedMapIdRef.current) {
+          const loadedOrigin = loadedSavedOriginRef.current;
+          if (loadedOrigin) {
+            fitAreaOfInterest(map, areaAroundOrigin(loadedOrigin));
+          }
+          return;
+        }
         if (lastLocation) {
           fitAreaOfInterest(map, areaAroundOrigin(lastLocation));
         }
@@ -1588,12 +1759,18 @@ export default function MapWorkspace() {
   const locationMessage =
     locationStatus === "located"
       ? "Centered near you"
+      : locationStatus === "saved"
+        ? "Loaded saved starting location"
+        : locationStatus === "loading-saved"
+          ? "Loading saved map…"
       : locationStatus === "cached"
         ? "Centered at your last known location"
         : locationStatus === "unavailable"
           ? "Location unavailable — use Set origin"
           : "Finding your location…";
   const resetAll = () => {
+    unknownSavedFiltersRef.current = [];
+    unknownSavedHeatmapsRef.current = [];
     setActiveFilters([]);
     setEnabledFilterIds(new Set());
     setFilterRuntime({});
@@ -1602,6 +1779,94 @@ export default function MapWorkspace() {
     setHeatmapRuntime({});
     setResetConfirmationOpen(false);
   };
+
+  const savedMapState = useMemo<SavedMapState>(
+    () => ({
+      version: SAVED_MAP_VERSION,
+      startingLocation: lastLocationRef.current
+        ? {
+            longitude: lastLocationRef.current[0],
+            latitude: lastLocationRef.current[1],
+          }
+        : null,
+      filters: [
+        ...activeFilters.map((selection) => ({
+          instanceId: selection.instanceId,
+          contribution: selection.entry.key,
+          parameters: selection.state,
+          enabled: enabledFilterIds.has(selection.instanceId),
+          randomSeed: selection.randomSeed,
+        })),
+        ...unknownSavedFiltersRef.current,
+      ],
+      heatmaps: [
+        ...activeHeatmaps.map((selection) => ({
+          instanceId: selection.instanceId,
+          contribution: selection.entry.key,
+          parameters: selection.state,
+          enabled: enabledHeatmapIds.has(selection.instanceId),
+          randomSeed: selection.randomSeed,
+        })),
+        ...unknownSavedHeatmapsRef.current,
+      ],
+    }),
+    [
+      activeFilters,
+      activeHeatmaps,
+      areaOfInterest,
+      configurationReady,
+      enabledFilterIds,
+      enabledHeatmapIds,
+    ],
+  );
+
+  useEffect(() => {
+    if (!configurationReady) return;
+    const hasContributions =
+      savedMapState.filters.length > 0 || savedMapState.heatmaps.length > 0;
+    if (!savedMapIdRef.current && !hasContributions) return;
+
+    const serialized = JSON.stringify(savedMapState);
+    if (skipNextSaveRef.current) {
+      skipNextSaveRef.current = false;
+      lastSavedSnapshotRef.current = serialized;
+      return;
+    }
+    if (serialized === lastSavedSnapshotRef.current) return;
+
+    const timeout = window.setTimeout(() => {
+      pendingSaveRef.current = { state: savedMapState, serialized };
+      if (saveInProgressRef.current) return;
+      saveInProgressRef.current = true;
+
+      void (async () => {
+        while (pendingSaveRef.current) {
+          const pending = pendingSaveRef.current;
+          pendingSaveRef.current = undefined;
+          try {
+            let id = savedMapIdRef.current;
+            if (id) {
+              await updateSavedMap(id, pending.state);
+            } else {
+              const created = await createSavedMap(pending.state);
+              id = created.id;
+              savedMapIdRef.current = id;
+              updateSavedMapUrl(id);
+            }
+            lastSavedSnapshotRef.current = pending.serialized;
+            if (mountedRef.current) setPersistenceError(undefined);
+          } catch (error) {
+            if (mountedRef.current) {
+              setPersistenceError(`Could not save map: ${errorMessage(error)}`);
+            }
+          }
+        }
+        saveInProgressRef.current = false;
+      })();
+    }, SAVE_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [configurationReady, savedMapState]);
 
   return (
     <main className="relative h-screen min-h-[640px] min-w-[1024px] overflow-hidden bg-slate-200 text-slate-900">
@@ -1617,7 +1882,7 @@ export default function MapWorkspace() {
           <ToolbarButton
             label="Set origin"
             icon="/icons/origin.svg"
-            disabled={!mapReady}
+            disabled={!mapReady || !configurationReady}
             onClick={() => setOriginDialogOpen(true)}
           />
           <ToolbarDropdown
@@ -1629,7 +1894,7 @@ export default function MapWorkspace() {
               icon: entry.extension.icon,
             }))}
             onAdd={addFilter}
-            disabled={!mapReady || !areaOfInterest}
+            disabled={!mapReady || !configurationReady || !areaOfInterest}
           />
           <ToolbarDropdown
             label="Add Heatmap"
@@ -1640,7 +1905,7 @@ export default function MapWorkspace() {
               icon: entry.extension.icon,
             }))}
             onAdd={addHeatmap}
-            disabled={!mapReady || !areaOfInterest}
+            disabled={!mapReady || !configurationReady || !areaOfInterest}
           />
           <div className="relative ml-auto">
             <button
@@ -2037,6 +2302,15 @@ export default function MapWorkspace() {
         {mapError && mapReady ? (
           <TransientSnack resetKey={mapError}>
             Base map warning: {mapError}
+          </TransientSnack>
+        ) : null}
+        {persistenceError ? (
+          <TransientSnack
+            resetKey={persistenceError}
+            role="alert"
+            testId="persistence-error"
+          >
+            {persistenceError}
           </TransientSnack>
         ) : null}
         {enabledFilters.length || enabledHeatmaps.length ? (

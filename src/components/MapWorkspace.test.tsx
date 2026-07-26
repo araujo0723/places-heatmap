@@ -3,6 +3,18 @@ import userEvent from "@testing-library/user-event";
 import type { FeatureCollection } from "geojson";
 import { vi } from "vitest";
 
+const savedMapMocks = vi.hoisted(() => ({
+  load: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+}));
+
+vi.mock("../core/saved-maps-client", () => ({
+  loadSavedMap: savedMapMocks.load,
+  createSavedMap: savedMapMocks.create,
+  updateSavedMap: savedMapMocks.update,
+}));
+
 vi.mock("maplibre-gl", () => {
   class MockSource {
     data: unknown;
@@ -238,13 +250,144 @@ async function addContribution(
 
 describe("MapWorkspace", () => {
   beforeEach(() => {
+    window.history.replaceState(null, "", "/");
     localStorage.clear();
     clearOptionalExtensionCaches();
+    savedMapMocks.load.mockReset();
+    savedMapMocks.create.mockReset();
+    savedMapMocks.update.mockReset();
+    savedMapMocks.create.mockImplementation(async (state) => ({
+      id: "test-map-id1",
+      state,
+    }));
+    savedMapMocks.update.mockImplementation(async (id, state) => ({
+      id,
+      state,
+    }));
   });
 
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it("creates a share URL on the first contribution and saves later changes", async () => {
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await drawArea(user);
+    expect(window.location.search).toBe("");
+
+    await addContribution(user, "Filter", "commute/time");
+
+    await waitFor(() => expect(savedMapMocks.create).toHaveBeenCalledOnce());
+    expect(window.location.search).toBe("?map=test-map-id1");
+    expect(savedMapMocks.create.mock.calls[0][0]).toMatchObject({
+      version: 1,
+      startingLocation: {
+        longitude: -0.115,
+        latitude: 51.512,
+      },
+      filters: [
+        {
+          contribution: "commute/time",
+          parameters: { minutes: 30 },
+          enabled: true,
+        },
+      ],
+      heatmaps: [],
+    });
+
+    await user.click(screen.getByRole("switch", { name: "Commute enabled" }));
+
+    await waitFor(() =>
+      expect(savedMapMocks.update).toHaveBeenLastCalledWith(
+        "test-map-id1",
+        expect.objectContaining({
+          filters: [
+            expect.objectContaining({
+              contribution: "commute/time",
+              enabled: false,
+            }),
+          ],
+        }),
+      ),
+    );
+    expect(savedMapMocks.create).toHaveBeenCalledOnce();
+  });
+
+  it("loads a shared URL and updates the same saved map", async () => {
+    window.history.replaceState(null, "", "/?map=shared-map12");
+    savedMapMocks.load.mockResolvedValue({
+      id: "shared-map12",
+      state: {
+        version: 1,
+        startingLocation: {
+          longitude: -84.388,
+          latitude: 33.749,
+        },
+        filters: [
+          {
+            instanceId: "filter-7",
+            contribution: "commute/time",
+            parameters: { minutes: 45 },
+            enabled: true,
+            randomSeed: 123,
+          },
+        ],
+        heatmaps: [
+          {
+            instanceId: "heatmap-8",
+            contribution: "commute/travel-time",
+            parameters: {},
+            enabled: false,
+            randomSeed: 456,
+          },
+        ],
+      },
+    });
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    expect(
+      await screen.findByRole("slider", { name: "Commute time" }),
+    ).toHaveValue("45");
+    expect(
+      screen.getByRole("switch", { name: "Commute enabled" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("switch", {
+        name: "Commute (20-min layers) visible",
+      }),
+    ).not.toBeChecked();
+    expect(savedMapMocks.load).toHaveBeenCalledWith(
+      "shared-map12",
+      expect.any(AbortSignal),
+    );
+    expect(savedMapMocks.update).not.toHaveBeenCalled();
+    expect(
+      JSON.parse(
+        localStorage.getItem("places-heatmap:last-location") ?? "null",
+      ),
+    ).toEqual({ longitude: -84.388, latitude: 33.749 });
+
+    await user.click(screen.getByRole("switch", { name: "Commute enabled" }));
+    await waitFor(() =>
+      expect(savedMapMocks.update).toHaveBeenLastCalledWith(
+        "shared-map12",
+        expect.objectContaining({
+          filters: [
+            expect.objectContaining({
+              contribution: "commute/time",
+              parameters: { minutes: 45 },
+              enabled: false,
+            }),
+          ],
+        }),
+      ),
+    );
+    expect(savedMapMocks.create).not.toHaveBeenCalled();
+    expect(window.location.search).toBe("?map=shared-map12");
   });
 
   it("dismisses snack notifications after five seconds", async () => {

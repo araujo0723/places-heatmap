@@ -25,8 +25,10 @@ async function drawArea(page: Page) {
 const contributionLabels: Record<string, string> = {
   "nearby-parks/distance": "Parks",
   "nearby-water/distance": "Lakes",
+  "commute/time": "Commute",
   "nearby-parks/influence": "Parks",
   "nearby-water/influence": "Lakes",
+  "commute/travel-time": "Commute (20-min layers)",
 };
 
 async function addContribution(
@@ -349,4 +351,47 @@ test("changes the automatic Area of Interest with Set origin", async ({ page }) 
   expect(new URL(suggestionRequest).searchParams.get("latitude")).toBe(
     "40.7128",
   );
+});
+
+test("creates, shares, loads, and updates a saved map URL", async ({ page }) => {
+  await page.goto("/");
+  await drawArea(page);
+
+  expect(new URL(page.url()).searchParams.get("map")).toBeNull();
+  await addContribution(page, "Filter", "commute/time");
+
+  await expect
+    .poll(() => new URL(page.url()).searchParams.get("map"))
+    .toMatch(/^[A-Za-z0-9_-]{12,32}$/);
+  const sharedUrl = page.url();
+
+  const firstUpdate = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PUT" &&
+      response.url().includes("/api/maps/"),
+  );
+  await page.getByRole("switch", { name: "Commute enabled" }).click();
+  expect((await firstUpdate).ok()).toBe(true);
+
+  await page.goto(sharedUrl);
+  await expect(page.getByRole("slider", { name: "Commute time" })).toHaveValue(
+    "30",
+  );
+  await expect(
+    page.getByRole("switch", { name: "Commute enabled" }),
+  ).not.toBeChecked();
+
+  const secondUpdate = page.waitForResponse(
+    (response) =>
+      response.request().method() === "PUT" &&
+      response.url().includes("/api/maps/"),
+  );
+  await page.getByRole("switch", { name: "Commute enabled" }).click();
+  expect((await secondUpdate).ok()).toBe(true);
+
+  await page.reload();
+  await expect(
+    page.getByRole("switch", { name: "Commute enabled" }),
+  ).toBeChecked();
+  expect(page.url()).toBe(sharedUrl);
 });

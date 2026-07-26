@@ -4,13 +4,22 @@ An Astro-based desktop map workspace with auto-discovered filters and heatmaps.
 The page shell is rendered by Astro, while the interactive MapLibre workspace is
 a React client island.
 
-On startup, the map requests browser geolocation and centers on the user's
-region at OpenStreetMap zoom 10 when permission is granted. The map reserves
-space for the sidebar when centering. A 30-by-30-mile Area of Interest is
-created automatically, extending 15 miles in every direction from the detected
+Map configurations are saved as versioned JSON in a local SQLite database. The
+first filter or heatmap added to a blank URL creates a saved map and adds its
+share ID as the `map` query parameter. Opening that URL loads the saved starting
+location, filter and heatmap parameters, and enabled states. Later changes
+automatically update the same saved map. The database defaults to
+`.data/places-heatmap.sqlite`; set `PLACES_HEATMAP_DB_PATH` to place it
+elsewhere.
+
+On a blank startup, the map requests browser geolocation and centers on the
+user's region at OpenStreetMap zoom 10 when permission is granted. A shared map
+URL uses its saved starting location instead. The map reserves space for the
+sidebar when centering. A 30-by-30-mile Area of Interest is created
+automatically, extending 15 miles in every direction from the selected
 location. The last browser-reported or manually selected location is stored in
-local browser storage and used as the initial origin on later visits, while a
-fresh location is requested.
+local browser storage and used as the initial origin on later blank visits,
+while a fresh location is requested.
 
 ## Development
 
@@ -181,7 +190,8 @@ tab. The action is disabled until an Area of Interest exists.
 - Every point and surface heatmap is clipped only to the Area of Interest.
   Active filters do not constrain heatmaps, so multiple heatmaps stack
   independently.
-- Settings and regions are intentionally session-only in this increment.
+- Filter and heatmap settings, enabled states, random seeds, and the starting
+  location are automatically persisted after a share URL has been created.
 
 ## Parks
 
