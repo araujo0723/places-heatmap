@@ -1052,13 +1052,6 @@ export default function MapWorkspace() {
       ),
     [activeFilters, enabledFilterIds],
   );
-  const predicates = useMemo(
-    () =>
-      enabledFilters
-        .map(({ instanceId }) => filterRuntime[instanceId]?.predicate)
-        .filter((predicate): predicate is PointPredicate => !!predicate),
-    [enabledFilters, filterRuntime],
-  );
   const regionFilters = useMemo(
     () =>
       enabledFilters.filter(
@@ -1125,31 +1118,21 @@ export default function MapWorkspace() {
       },
     );
 
-  const filtersBlocked = enabledFilters.some(
-    ({ instanceId }) => !filterRuntime[instanceId]?.predicate,
-  );
-
   const groupedPoints = useMemo(() => {
     const groups = new Map<string, FeatureCollection<Point>>();
     for (const { instanceId } of activeHeatmaps) {
       const points = heatmapRuntime[instanceId]?.points ?? [];
       groups.set(instanceId, {
         type: "FeatureCollection",
-        features: filtersBlocked || !constrainedBoundary
+        features: !areaOfInterest
           ? []
-          : composePoints(points, predicates, [constrainedBoundary]).map(
+          : composePoints(points, [], [areaOfInterest]).map(
               ({ feature }) => feature,
             ),
       });
     }
     return groups;
-  }, [
-    activeHeatmaps,
-    filtersBlocked,
-    heatmapRuntime,
-    predicates,
-    constrainedBoundary,
-  ]);
+  }, [activeHeatmaps, areaOfInterest, heatmapRuntime]);
 
   const surfaceCollections = useMemo(() => {
     const groups = new Map<
@@ -1162,13 +1145,13 @@ export default function MapWorkspace() {
         heatmapRuntime[instanceId]?.surface ?? EMPTY_SURFACE_COLLECTION;
       groups.set(
         instanceId,
-        constrainedBoundary
-          ? clipSurfaceCollection(surface, [constrainedBoundary])
+        areaOfInterest
+          ? clipSurfaceCollection(surface, [areaOfInterest])
           : EMPTY_SURFACE_COLLECTION,
       );
     }
     return groups;
-  }, [activeHeatmaps, constrainedBoundary, heatmapRuntime]);
+  }, [activeHeatmaps, areaOfInterest, heatmapRuntime]);
 
   useEffect(() => {
     const map = mapRef.current;

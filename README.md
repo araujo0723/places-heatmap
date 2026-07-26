@@ -137,8 +137,11 @@ tab. The action is disabled until an Area of Interest exists.
   so the map shows only the common area.
 - Result components at or below 100,000 square meters (about 24.7 acres) are
   removed.
-- Filter regions intersect with the Area of Interest and all point predicates.
-- Every point and surface heatmap is clipped to the resulting boundary.
+- Filter regions intersect with the Area of Interest, while point predicates
+  retain AND semantics for filtered results.
+- Every point and surface heatmap is clipped only to the Area of Interest.
+  Active filters do not constrain heatmaps, so multiple heatmaps stack
+  independently.
 - Settings and regions are intentionally session-only in this increment.
 
 ## Nearby parks

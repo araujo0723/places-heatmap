@@ -210,6 +210,7 @@ import MapWorkspace from "./MapWorkspace";
 import { Map as MapLibreMap } from "maplibre-gl";
 import { clearNearbyParkCache } from "../extensions/nearby-parks/data";
 import { clearNearbyWaterCache } from "../extensions/nearby-water/data";
+import { extensionRegistry } from "../extensions/registry";
 
 async function drawArea(user: ReturnType<typeof userEvent.setup>) {
   await user.click(
@@ -264,6 +265,8 @@ const contributionLabels: Record<string, string> = {
   "nearby-parks/influence": "Nearby parks · Park influence",
   "nearby-water/influence": "Nearby water · Water influence",
   "commute/travel-time": "Commute time · Commute time",
+  "test/reject-all": "Test contributions · Reject all",
+  "test/points": "Test contributions · Test points",
 };
 
 async function addContribution(
@@ -779,6 +782,9 @@ describe("MapWorkspace", () => {
         ],
       },
     });
+    expect(
+      map.getSource("extension-source-heatmap-2")?.data.features.length,
+    ).toBeGreaterThan(1);
 
     map.setStyleLoaded(true);
     map.setCenter([1, 52]);
@@ -1022,6 +1028,85 @@ describe("MapWorkspace", () => {
         name: "Remove Park influence",
       }),
     ).toHaveLength(1);
+  });
+
+  it("clips point heatmaps only to the Area of Interest", async () => {
+    const filterCount = extensionRegistry.filters.length;
+    const heatmapCount = extensionRegistry.heatmaps.length;
+    const testExtension = {
+      apiVersion: 1 as const,
+      id: "test",
+      name: "Test contributions",
+    };
+    extensionRegistry.filters.push({
+      key: "test/reject-all",
+      extension: testExtension,
+      contribution: {
+        id: "reject-all",
+        name: "Reject all",
+        initialState: {},
+        Controls: () => null,
+        resolvePredicate: async () => () => false,
+      },
+    });
+    extensionRegistry.heatmaps.push({
+      key: "test/points",
+      extension: testExtension,
+      contribution: {
+        kind: "points",
+        id: "points",
+        name: "Test points",
+        initialState: {},
+        load: async () => ({
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              id: "inside",
+              geometry: { type: "Point", coordinates: [0.01, 0] },
+              properties: {},
+            },
+            {
+              type: "Feature",
+              id: "outside",
+              geometry: { type: "Point", coordinates: [1, 1] },
+              properties: {},
+            },
+          ],
+        }),
+        style: {},
+      },
+    });
+
+    try {
+      const user = userEvent.setup();
+      render(<MapWorkspace />);
+      await screen.findByText("Centered near you");
+      const map = (
+        MapLibreMap as unknown as {
+          lastInstance: {
+            getSource(id: string): { data: FeatureCollection } | undefined;
+            setCenter(center: [number, number]): void;
+          };
+        }
+      ).lastInstance;
+      map.setCenter([0, 0]);
+
+      await drawArea(user);
+      await addContribution(user, "Filter", "test/reject-all");
+      await addContribution(user, "Heatmap", "test/points");
+
+      await waitFor(() =>
+        expect(
+          map
+            .getSource("extension-source-heatmap-2")
+            ?.data.features.map((feature) => feature.id),
+        ).toEqual(["inside"]),
+      );
+    } finally {
+      extensionRegistry.filters.splice(filterCount);
+      extensionRegistry.heatmaps.splice(heatmapCount);
+    }
   });
 
   it("looks up a commute address and draws the selected red filter outline", async () => {
