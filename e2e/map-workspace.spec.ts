@@ -84,6 +84,58 @@ test("starts with the bundled data contributions", async ({ page }) => {
     .toEqual({ longitude: -74.006, latitude: 40.7128 });
 });
 
+test("shows one unfaded, unclipped hint for header buttons", async ({
+  page,
+}) => {
+  await page.route("**/api/parks?**", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ tiles: [], parks: [] }),
+    }),
+  );
+  await page.goto("/");
+  await drawArea(page);
+  await addContribution(page, "Filter", "nearby-parks/distance");
+
+  for (const label of [
+    "Set origin",
+    "Add Filter",
+    "Add Heatmap",
+    "RESET ALL",
+  ]) {
+    expect(
+      await page.getByRole("button", { name: label }).getAttribute("title"),
+    ).toBeNull();
+  }
+
+  const resetButton = page.getByRole("button", { name: "RESET ALL" });
+  const resetHint = page.getByRole("tooltip", {
+    name: "Reset all filters and heatmaps",
+  });
+  await resetButton.hover();
+
+  await expect
+    .poll(() =>
+      resetHint.evaluate((element) => getComputedStyle(element).opacity),
+    )
+    .toBe("1");
+  expect(
+    await resetButton.evaluate((element) => getComputedStyle(element).opacity),
+  ).toBe("0.8");
+
+  const sidebarBounds = await page.locator("aside").boundingBox();
+  const hintBounds = await resetHint.boundingBox();
+  expect(sidebarBounds).not.toBeNull();
+  expect(hintBounds).not.toBeNull();
+  if (sidebarBounds && hintBounds) {
+    expect(hintBounds.x).toBeGreaterThanOrEqual(sidebarBounds.x);
+    expect(hintBounds.x + hintBounds.width).toBeLessThanOrEqual(
+      sidebarBounds.x + sidebarBounds.width,
+    );
+  }
+});
+
 test("loads nearby park regions and influence contours", async ({ page }) => {
   let parkRequests = 0;
   await page.route("**/api/parks?**", async (route) => {

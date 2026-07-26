@@ -684,21 +684,25 @@ function ToolbarDropdown({
 
   return (
     <div className="relative" ref={menuRef}>
-      <button
-        aria-expanded={open}
-        aria-haspopup="menu"
-        aria-label={label}
-        className="group relative grid size-11 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-indigo-600 focus:ring-2 focus:ring-indigo-300 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300"
-        disabled={disabled}
-        title={label}
-        type="button"
-        onClick={() => setOpen((current) => !current)}
-      >
-        <img alt="" aria-hidden="true" className="size-5" src={icon} />
-        <span className="pointer-events-none absolute top-full left-1/2 z-30 mt-2 -translate-x-1/2 rounded-md bg-slate-950 px-2 py-1 text-[10px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+      <div className="relative">
+        <button
+          aria-expanded={open}
+          aria-haspopup="menu"
+          aria-label={label}
+          className="peer grid size-11 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-indigo-600 focus:ring-2 focus:ring-indigo-300 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300"
+          disabled={disabled}
+          type="button"
+          onClick={() => setOpen((current) => !current)}
+        >
+          <img alt="" aria-hidden="true" className="size-5" src={icon} />
+        </button>
+        <span
+          className="pointer-events-none absolute top-full left-1/2 z-30 mt-2 -translate-x-1/2 rounded-md bg-slate-950 px-2 py-1 text-[10px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity peer-hover:opacity-100 peer-focus-visible:opacity-100"
+          role="tooltip"
+        >
           {label}
         </span>
-      </button>
+      </div>
       {open ? (
         <div
           aria-label={`${label} options`}
@@ -745,29 +749,33 @@ function ToolbarButton({
   onClick: () => void;
 }) {
   return (
-    <button
-      aria-label={label}
-      aria-pressed={active}
-      className={`group relative grid size-11 place-items-center rounded-lg border shadow-sm transition focus:ring-2 focus:ring-indigo-300 focus:outline-none disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300 ${
-        active
-          ? "border-indigo-600 bg-indigo-600 text-white"
-          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-indigo-600"
-      }`}
-      disabled={disabled}
-      title={label}
-      type="button"
-      onClick={onClick}
-    >
-      <img
-        alt=""
-        aria-hidden="true"
-        className={`size-5 ${active ? "brightness-0 invert" : ""}`}
-        src={icon}
-      />
-      <span className="pointer-events-none absolute top-full left-1/2 z-30 mt-2 -translate-x-1/2 rounded-md bg-slate-950 px-2 py-1 text-[10px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+    <div className="relative">
+      <button
+        aria-label={label}
+        aria-pressed={active}
+        className={`peer grid size-11 place-items-center rounded-lg border shadow-sm transition focus:ring-2 focus:ring-indigo-300 focus:outline-none disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-50 disabled:text-slate-300 ${
+          active
+            ? "border-indigo-600 bg-indigo-600 text-white"
+            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50 hover:text-indigo-600"
+        }`}
+        disabled={disabled}
+        type="button"
+        onClick={onClick}
+      >
+        <img
+          alt=""
+          aria-hidden="true"
+          className={`size-5 ${active ? "brightness-0 invert" : ""}`}
+          src={icon}
+        />
+      </button>
+      <span
+        className="pointer-events-none absolute top-full left-1/2 z-30 mt-2 -translate-x-1/2 rounded-md bg-slate-950 px-2 py-1 text-[10px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity peer-hover:opacity-100 peer-focus-visible:opacity-100"
+        role="tooltip"
+      >
         {label}
       </span>
-    </button>
+    </div>
   );
 }
 
@@ -1591,30 +1599,36 @@ export default function MapWorkspace() {
             onAdd={addHeatmap}
             disabled={!mapReady || !areaOfInterest}
           />
-          <button
-            aria-label="RESET ALL"
-            className="group relative ml-auto grid size-11 place-items-center rounded-lg border border-slate-200 bg-white text-red-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 focus:ring-2 focus:ring-rose-300 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-slate-50"
-            disabled={activeFilters.length === 0 && activeHeatmaps.length === 0}
-            title="Reset all filters and heatmaps"
-            type="button"
-            onClick={() => setResetConfirmationOpen(true)}
-          >
-            <svg
-              aria-hidden="true"
-              className="size-5"
-              fill="none"
-              stroke="currentColor"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth="1.8"
-              viewBox="0 0 24 24"
+          <div className="relative ml-auto">
+            <button
+              aria-label="RESET ALL"
+              className="peer grid size-11 place-items-center rounded-lg border border-slate-200 bg-white text-red-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 focus:ring-2 focus:ring-rose-300 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-slate-50"
+              disabled={
+                activeFilters.length === 0 && activeHeatmaps.length === 0
+              }
+              type="button"
+              onClick={() => setResetConfirmationOpen(true)}
             >
-              <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
-            </svg>
-            <span className="pointer-events-none absolute top-full left-1/2 z-30 mt-2 -translate-x-1/2 rounded-md bg-slate-950 px-2 py-1 text-[10px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+              <svg
+                aria-hidden="true"
+                className="size-5"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.8"
+                viewBox="0 0 24 24"
+              >
+                <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
+              </svg>
+            </button>
+            <span
+              className="pointer-events-none absolute top-full right-0 z-30 mt-2 rounded-md bg-slate-950 px-2 py-1 text-[10px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity peer-hover:opacity-100 peer-focus-visible:opacity-100"
+              role="tooltip"
+            >
               Reset all filters and heatmaps
             </span>
-          </button>
+          </div>
           <span className="sr-only" data-testid="area-of-interest-count">
             {areaOfInterest ? 1 : 0}
           </span>
