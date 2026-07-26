@@ -1,3 +1,9 @@
+import { vi } from "vitest";
+
+vi.mock("../server/parks", () => ({
+  getParksForBounds: vi.fn(async () => []),
+}));
+
 import { GET } from "../pages/api/parks";
 
 function request(query = "") {
@@ -7,20 +13,18 @@ function request(query = "") {
 }
 
 describe("parks endpoint validation", () => {
-  it("requires valid zoom-11 tiles", async () => {
+  it("requires valid query bounds", async () => {
     expect((await request()).status).toBe(400);
-    expect((await request("?tiles=10/1/1")).status).toBe(400);
+    expect(
+      (await request("?west=-181&south=30&east=-80&north=35")).status,
+    ).toBe(400);
   });
 
-  it("rejects viewports covering more than 25 tiles", async () => {
-    const tiles = Array.from(
-      { length: 26 },
-      (_, index) => `11/${index}/1000`,
-    ).join(",");
-    const response = await request(`?tiles=${tiles}`);
-    expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toMatchObject({
-      code: "VIEWPORT_TOO_WIDE",
-    });
+  it("accepts a complete region without a tile-count limit", async () => {
+    const response = await request(
+      "?west=-85.7&south=30.3&east=-80.8&north=35.1",
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({ parks: [] });
   });
 });

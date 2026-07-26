@@ -1,6 +1,5 @@
 import {
   expandBoundsByMeters,
-  MAX_PARK_TILES,
   parkQueryCoverage,
   parseTileKey,
   tileBounds,
@@ -37,12 +36,11 @@ describe("park query geography", () => {
     expect(tileBounds(tiles[0]).west).toBeGreaterThanOrEqual(-180);
   });
 
-  it("exposes coverage that callers can cap", () => {
+  it("exposes complete coverage without imposing a request cap", () => {
     const coverage = parkQueryCoverage({
       center: [0, 0],
       bounds: { west: -20, south: -20, east: 20, north: 20 },
     });
-    expect(coverage.tiles.length).toBeGreaterThan(MAX_PARK_TILES);
+    expect(coverage.tiles.length).toBeGreaterThan(25);
   });
 });
-

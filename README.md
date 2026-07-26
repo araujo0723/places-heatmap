@@ -60,17 +60,21 @@ npm run test:e2e
 
 The app uses the public OpenStreetMap raster endpoint for development. Copy
 `.env.example` to `.env` to select another compatible tile endpoint and
-attribution and configure the nearby-area caches:
+attribution.
+
+Park and water lookups use `georgia-latest.osm.pbf` from the project root by
+default. Set `OSM_PBF_PATH` to use another local extract. Build the derived
+spatial index before starting the app:
 
 ```sh
-REDIS_URL=redis://localhost:6379
+npm run index:osm
 ```
 
-Park and water lookups fall back to in-process caches and live Overpass requests
-when Redis is unavailable. `OVERPASS_API_URL` can select another compatible
-interpreter. When `ORS_API_KEY` is set, openrouteservice supplies center-only
-park records if Overpass is temporarily overloaded. Production deployments
-should use map and Overpass services sized for their traffic.
+The index is stored under `.cache/osm/` and automatically rebuilt when the PBF
+size or modification time changes. `OSM_INDEX_PATH` can select another cache
+location. If the index is missing, the first park or water request builds it
+automatically. The APIs query the full requested bounds and do not impose an
+Overpass-style tile or result limit.
 
 The production build uses Astro's standalone Node adapter. The page shell stays
 prerendered while `/api/parks` and `/api/water` run on the server:
@@ -149,32 +153,33 @@ tab. The action is disabled until an Area of Interest exists.
 
 ## Nearby parks
 
-The bundled Nearby parks extension queries OpenStreetMap `leisure=park` objects
-for the Area of Interest plus 5 km and shares six-hour, zoom-11 tile caches
-between its filter and heatmap.
+The bundled Nearby parks extension queries local OpenStreetMap
+`leisure=park` objects for the Area of Interest plus 5 km and shares a six-hour
+client cache between its filter and heatmap.
 
 - **Park distance** creates a bbox-expanded or circular filter region for every
   park, from 0 to 2,000 m.
 - **Park influence** renders a full-strength park core and twelve geographic
   contour bands fading to zero at 300 m.
-- Large areas are split into API requests of at most 25 cache tiles and their
-  park records are merged before filtering.
+- The entire expanded Area of Interest is loaded in one local-index request,
+  without a tile or result-count limit.
 
 ## Nearby water
 
 The bundled Nearby water extension queries OpenStreetMap lakes, ponds,
 reservoirs, basins, lagoons, oxbows, cenotes, stream pools, reflecting pools,
-moats, salt ponds, and unclassified enclosed `natural=water` features for the
-Area of Interest plus 5 km. Commonly used `water=fishpond` records are included,
+moats, salt ponds, and unclassified enclosed `natural=water` features from the
+local PBF for the Area of Interest plus 5 km. Commonly used `water=fishpond`
+records are included,
 while explicit linear water types such as rivers, canals, streams, and ditches
-are excluded. Its filter and heatmap share six-hour, zoom-11 tile caches.
+are excluded. Its filter and heatmap share a six-hour client cache.
 
 - **Water distance** creates a blue bbox-expanded or circular filter region for
   every body of water, from 0 to 2,000 m.
 - **Water influence** renders a blue, full-strength water core and twelve
   geographic contour bands fading to zero at 300 m.
-- Large areas are split into API requests of at most 25 cache tiles and their
-  water records are merged before filtering.
+- The entire expanded Area of Interest is loaded in one local-index request,
+  without a tile or result-count limit.
 
 ## Commute time
 

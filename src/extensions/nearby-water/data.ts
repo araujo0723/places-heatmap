@@ -1,10 +1,4 @@
-import {
-  boundsIntersect,
-  MAX_NEARBY_AREA_TILES,
-  tileKey,
-  waterQueryCoverage,
-  type MapTile,
-} from "../../core/geo";
+import { boundsIntersect, waterQueryCoverage } from "../../core/geo";
 import type { WaterRecord } from "../../core/water";
 import type { MapViewport } from "../api";
 
@@ -45,22 +39,15 @@ function waterBounds(water: WaterRecord) {
   );
 }
 
-function tileBatches(tiles: MapTile[]) {
-  return Array.from(
-    { length: Math.ceil(tiles.length / MAX_NEARBY_AREA_TILES) },
-    (_, index) =>
-      tiles.slice(
-        index * MAX_NEARBY_AREA_TILES,
-        (index + 1) * MAX_NEARBY_AREA_TILES,
-      ),
-  );
-}
-
-async function loadWaterBatch(tiles: MapTile[]) {
-  const tileKeys = tiles.map(tileKey).sort();
-  const response = await fetch(
-    `/api/water?tiles=${encodeURIComponent(tileKeys.join(","))}`,
-  );
+async function loadWater(viewport: MapViewport) {
+  const { bounds } = waterQueryCoverage(viewport);
+  const query = new URLSearchParams({
+    west: String(bounds.west),
+    south: String(bounds.south),
+    east: String(bounds.east),
+    north: String(bounds.north),
+  });
+  const response = await fetch(`/api/water?${query}`);
   const payload = (await response.json().catch(() => ({}))) as
     | WaterResponse
     | { error?: unknown };
@@ -86,22 +73,10 @@ export async function loadNearbyWater(
   const now = Date.now();
   let entry = cache.get(coverage.key);
   if (!entry || entry.expiresAt <= now) {
-    const promise = Promise.all(
-      tileBatches(coverage.tiles).map(loadWaterBatch),
-    )
-      .then((batches) => {
-        const waters = new Map<string, WaterRecord>();
-        for (const batch of batches) {
-          for (const water of batch) {
-            waters.set(water.id, water);
-          }
-        }
-        return [...waters.values()];
-      })
-      .catch((error) => {
-        cache.delete(coverage.key);
-        throw error;
-      });
+    const promise = loadWater(viewport).catch((error) => {
+      cache.delete(coverage.key);
+      throw error;
+    });
     entry = { expiresAt: now + SIX_HOURS, promise };
     cache.set(coverage.key, entry);
   }

@@ -1,10 +1,4 @@
-import {
-  boundsIntersect,
-  MAX_PARK_TILES,
-  parkQueryCoverage,
-  tileKey,
-  type MapTile,
-} from "../../core/geo";
+import { boundsIntersect, parkQueryCoverage } from "../../core/geo";
 import type { ParkRecord } from "../../core/parks";
 import type { MapViewport } from "../api";
 
@@ -45,22 +39,15 @@ function parkBounds(park: ParkRecord) {
   );
 }
 
-function tileBatches(tiles: MapTile[]) {
-  return Array.from(
-    { length: Math.ceil(tiles.length / MAX_PARK_TILES) },
-    (_, index) =>
-      tiles.slice(
-        index * MAX_PARK_TILES,
-        (index + 1) * MAX_PARK_TILES,
-      ),
-  );
-}
-
-async function loadParkBatch(tiles: MapTile[]) {
-  const tileKeys = tiles.map(tileKey).sort();
-  const response = await fetch(
-    `/api/parks?tiles=${encodeURIComponent(tileKeys.join(","))}`,
-  );
+async function loadParks(viewport: MapViewport) {
+  const { bounds } = parkQueryCoverage(viewport);
+  const query = new URLSearchParams({
+    west: String(bounds.west),
+    south: String(bounds.south),
+    east: String(bounds.east),
+    north: String(bounds.north),
+  });
+  const response = await fetch(`/api/parks?${query}`);
   const payload = (await response.json().catch(() => ({}))) as
     | ParkResponse
     | { error?: unknown };
@@ -86,20 +73,10 @@ export async function loadNearbyParks(
   const now = Date.now();
   let entry = cache.get(coverage.key);
   if (!entry || entry.expiresAt <= now) {
-    const promise = Promise.all(
-      tileBatches(coverage.tiles).map(loadParkBatch),
-    )
-      .then((batches) => {
-        const parks = new Map<string, ParkRecord>();
-        for (const batch of batches) {
-          for (const park of batch) parks.set(park.id, park);
-        }
-        return [...parks.values()];
-      })
-      .catch((error) => {
-        cache.delete(coverage.key);
-        throw error;
-      });
+    const promise = loadParks(viewport).catch((error) => {
+      cache.delete(coverage.key);
+      throw error;
+    });
     entry = { expiresAt: now + SIX_HOURS, promise };
     cache.set(coverage.key, entry);
   }

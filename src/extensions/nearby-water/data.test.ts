@@ -36,7 +36,8 @@ describe("nearby water client loading", () => {
 
     expect(first).toEqual(second);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/water?tiles=");
+    expect(String(fetchMock.mock.calls[0][0])).toContain("/api/water?west=");
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain("tiles=");
   });
 
   it("rejects malformed responses without retaining them", async () => {

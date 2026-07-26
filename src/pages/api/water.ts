@@ -1,55 +1,26 @@
 import type { APIRoute } from "astro";
-import {
-  MAX_NEARBY_AREA_TILES,
-  parseTileKey,
-  tileKey,
-} from "../../core/geo";
-import { getWaterForTiles } from "../../server/water";
+import { getWaterForBounds } from "../../server/water";
+import { parseRequestBounds } from "../../server/request-bounds";
 
 export const prerender = false;
 
 export const GET: APIRoute = async ({ request }) => {
-  const url = new URL(request.url);
-  const requestedKeys = Array.from(
-    new Set(
-      (url.searchParams.get("tiles") ?? "")
-        .split(",")
-        .map((value) => value.trim())
-        .filter(Boolean),
-    ),
-  );
-  if (requestedKeys.length === 0) {
-    return Response.json(
-      { error: "At least one water tile is required." },
-      { status: 400 },
-    );
-  }
-  if (requestedKeys.length > MAX_NEARBY_AREA_TILES) {
+  const bounds = parseRequestBounds(new URL(request.url));
+  if (!bounds) {
     return Response.json(
       {
-        code: "VIEWPORT_TOO_WIDE",
-        error: "Zoom in to search for nearby water.",
+        error:
+          "Valid west, south, east, and north coordinates are required.",
       },
-      { status: 422 },
-    );
-  }
-  const tiles = requestedKeys.map(parseTileKey);
-  if (tiles.some((tile) => !tile)) {
-    return Response.json(
-      { error: "Water tile identifiers must use zoom 11." },
       { status: 400 },
     );
   }
 
   try {
-    const validTiles = tiles.filter(
-      (tile): tile is NonNullable<typeof tile> => !!tile,
-    );
-    const waters = await getWaterForTiles(validTiles);
     return Response.json(
       {
-        tiles: validTiles.map(tileKey),
-        waters,
+        bounds,
+        waters: await getWaterForBounds(bounds),
       },
       {
         headers: {
@@ -65,7 +36,7 @@ export const GET: APIRoute = async ({ request }) => {
             ? error.message
             : "Nearby water could not be loaded.",
       },
-      { status: 502 },
+      { status: 500 },
     );
   }
 };

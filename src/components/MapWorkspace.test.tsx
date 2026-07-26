@@ -433,7 +433,7 @@ describe("MapWorkspace", () => {
         fetchMock.mock.calls.filter(([input]) =>
           String(input).startsWith("/api/parks?"),
         ),
-      ).toHaveLength(3),
+      ).toHaveLength(1),
     );
     const initialParkRequestCount = fetchMock.mock.calls.filter(([input]) =>
       String(input).startsWith("/api/parks?"),
@@ -592,7 +592,7 @@ describe("MapWorkspace", () => {
       { timeout: 5_000 },
     );
     expect(screen.queryByText("Nearby parks")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     expect(map.getLayer("filter-owned-regions-fill")).toMatchObject({
       paint: {
@@ -633,7 +633,7 @@ describe("MapWorkspace", () => {
     map.setCenter([1, 52]);
     map.emit("moveend");
     await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("shows status only while a filter is loading or reloading", async () => {
@@ -671,7 +671,7 @@ describe("MapWorkspace", () => {
     fireEvent.change(slider, { target: { value: "350" } });
     fireEvent.pointerUp(slider);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     expect(screen.getByText("Loading")).toBeInTheDocument();
 
     await act(async () => {
@@ -730,7 +730,7 @@ describe("MapWorkspace", () => {
         map.getSource("filter-owned-regions-source")?.data.features,
       ).toHaveLength(1),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
 
     const toggle = screen.getByRole("switch", {
@@ -750,7 +750,7 @@ describe("MapWorkspace", () => {
         map.getSource("filter-owned-regions-source")?.data.features,
       ).toHaveLength(0),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await user.click(toggle);
 
@@ -761,7 +761,7 @@ describe("MapWorkspace", () => {
         map.getSource("filter-owned-regions-source")?.data.features,
       ).toHaveLength(1),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("shows and hides a heatmap without reloading its data", async () => {
@@ -793,7 +793,7 @@ describe("MapWorkspace", () => {
     expect(screen.getByText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("Off")).not.toBeInTheDocument();
     expect(screen.queryByTestId("map-active-summary")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await act(async () => {
       for (const resolve of resolveRequests.splice(0)) {
@@ -811,7 +811,7 @@ describe("MapWorkspace", () => {
     expect(screen.getByTestId("map-active-summary")).toHaveTextContent(
       "Park influence",
     );
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("draws only the common boundary of park and water filters", async () => {

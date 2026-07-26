@@ -14,9 +14,7 @@ export interface MapTile {
 }
 
 export const NEARBY_AREA_TILE_ZOOM = 11;
-export const MAX_NEARBY_AREA_TILES = 25;
 export const PARK_TILE_ZOOM = NEARBY_AREA_TILE_ZOOM;
-export const MAX_PARK_TILES = MAX_NEARBY_AREA_TILES;
 const EARTH_RADIUS_METERS = 6_371_008.8;
 const MAX_MERCATOR_LATITUDE = 85.05112878;
 

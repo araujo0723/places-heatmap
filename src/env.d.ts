@@ -3,8 +3,8 @@
 interface ImportMetaEnv {
   readonly PUBLIC_BASEMAP_TILE_URL?: string;
   readonly PUBLIC_BASEMAP_ATTRIBUTION?: string;
-  readonly REDIS_URL?: string;
-  readonly OVERPASS_API_URL?: string;
+  readonly OSM_PBF_PATH?: string;
+  readonly OSM_INDEX_PATH?: string;
   readonly ORS_API_KEY?: string;
 }
 
@@ -14,8 +14,8 @@ interface ImportMeta {
 
 declare namespace NodeJS {
   interface ProcessEnv {
-    readonly REDIS_URL?: string;
-    readonly OVERPASS_API_URL?: string;
+    readonly OSM_PBF_PATH?: string;
+    readonly OSM_INDEX_PATH?: string;
     readonly ORS_API_KEY?: string;
   }
 }
