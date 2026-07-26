@@ -1,3 +1,6 @@
+import buffer from "@turf/buffer";
+import { featureCollection, polygon } from "@turf/helpers";
+import union from "@turf/union";
 import type { FeatureCollection, Polygon } from "geojson";
 import type {
   RegionGeometry,
@@ -11,10 +14,14 @@ export type ZillowPolygon = ZillowCoordinate[];
 export const ZILLOW_MAX_POLYGONS = 8;
 export const ZILLOW_MAX_TOTAL_POINTS = 96;
 export const ZILLOW_MAX_POINTS_PER_POLYGON = 48;
+export const ZILLOW_SUPER_REGION_INITIAL_GAP_MILES = 0.5;
+export const ZILLOW_SUPER_REGION_MAX_GAP_MILES = 1.25;
 
 const MIN_SIMPLIFICATION_TOLERANCE = 0.00025;
 const MAX_SIMPLIFICATION_TOLERANCE = 0.01;
 const SIMPLIFICATION_SCALE_FACTOR = 0.015;
+const SUPER_REGION_BUFFER_STEPS = 8;
+const SUPER_REGION_GAP_STEP_MILES = 0.25;
 
 function sameCoordinate(
   left: ZillowCoordinate,
@@ -235,6 +242,74 @@ function polygonArea(polygon: ReadonlyArray<ZillowCoordinate>) {
   );
 }
 
+function geometryPolygons(
+  geometry: Polygon | { type: "MultiPolygon"; coordinates: number[][][][] },
+) {
+  const coordinates =
+    geometry.type === "Polygon"
+      ? [geometry.coordinates]
+      : geometry.coordinates;
+  return coordinates.map((candidate) => candidate[0] as ZillowPolygon);
+}
+
+function connectNearbyPolygons(
+  polygons: ReadonlyArray<ReadonlyArray<ZillowCoordinate>>,
+  maximumGapMiles = ZILLOW_SUPER_REGION_INITIAL_GAP_MILES,
+) {
+  if (polygons.length <= 1 || maximumGapMiles <= 0) {
+    return polygons.map((candidate) => [...candidate]);
+  }
+
+  try {
+    const combined = union(
+      featureCollection(
+        polygons.map((candidate) => polygon([closePolygon(candidate)])),
+      ),
+    );
+    if (!combined) return polygons.map((candidate) => [...candidate]);
+
+    const bufferMiles = maximumGapMiles / 2;
+    const expanded = buffer(combined, bufferMiles, {
+      units: "miles",
+      steps: SUPER_REGION_BUFFER_STEPS,
+    });
+    const connected =
+      expanded &&
+      buffer(expanded, -bufferMiles, {
+        units: "miles",
+        steps: SUPER_REGION_BUFFER_STEPS,
+      });
+
+    return connected
+      ? geometryPolygons(connected.geometry)
+      : polygons.map((candidate) => [...candidate]);
+  } catch {
+    return polygons.map((candidate) => [...candidate]);
+  }
+}
+
+function connectPolygonsForComponentBudget(
+  polygons: ReadonlyArray<ReadonlyArray<ZillowCoordinate>>,
+) {
+  let connected = connectNearbyPolygons(
+    polygons,
+    ZILLOW_SUPER_REGION_INITIAL_GAP_MILES,
+  );
+
+  for (
+    let maximumGapMiles =
+      ZILLOW_SUPER_REGION_INITIAL_GAP_MILES +
+      SUPER_REGION_GAP_STEP_MILES;
+    connected.length > ZILLOW_MAX_POLYGONS &&
+    maximumGapMiles <= ZILLOW_SUPER_REGION_MAX_GAP_MILES;
+    maximumGapMiles += SUPER_REGION_GAP_STEP_MILES
+  ) {
+    connected = connectNearbyPolygons(polygons, maximumGapMiles);
+  }
+
+  return connected;
+}
+
 function allocateVertexBudgets(
   polygons: ReadonlyArray<ReadonlyArray<ZillowCoordinate>>,
 ) {
@@ -279,9 +354,10 @@ function allocateVertexBudgets(
 export function preparePolygonsForZillow(
   polygons: ReadonlyArray<ReadonlyArray<ZillowCoordinate>>,
 ) {
-  const candidates = polygons
+  const validPolygons = polygons
     .map((polygon) => openPolygon(polygon))
-    .filter((polygon) => polygon.length >= 3 && polygonArea(polygon) > 0)
+    .filter((polygon) => polygon.length >= 3 && polygonArea(polygon) > 0);
+  const candidates = connectPolygonsForComponentBudget(validPolygons)
     .map((polygon) =>
       capVertices(
         simplifyClosedPolygon(polygon),

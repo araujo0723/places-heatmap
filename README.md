@@ -150,8 +150,11 @@ extension API requests return `404`.
 ## Zillow
 
 The bundled Zillow extension adds **GO TO ZILLOW** to **Actions**. It unions
-regions from each source, intersects those source boundaries, keeps the largest
-components, and simplifies the result to a conservative Zillow vertex budget.
+regions from each source and intersects those source boundaries. Its
+simplification starts by connecting components within half a mile, then widens
+the connection distance in quarter-mile steps (up to 1.25 miles) only when
+needed to fit Zillow's component limit. It keeps the largest remaining
+components and simplifies the result to a conservative Zillow vertex budget.
 After Zillow accepts the custom boundary, its rentals search opens in a new
 tab. The action is disabled until an Area of Interest exists.
 

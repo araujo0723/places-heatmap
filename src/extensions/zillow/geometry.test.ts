@@ -7,6 +7,8 @@ import {
   zillowPreviewSurface,
   ZILLOW_MAX_POLYGONS,
   ZILLOW_MAX_POINTS_PER_POLYGON,
+  ZILLOW_SUPER_REGION_INITIAL_GAP_MILES,
+  ZILLOW_SUPER_REGION_MAX_GAP_MILES,
   ZILLOW_MAX_TOTAL_POINTS,
 } from "./geometry";
 import { buildZillowCustomRegionPolygon } from "./zillow";
@@ -59,6 +61,85 @@ describe("Zillow region geometry", () => {
 
     expect(prepared).toHaveLength(ZILLOW_MAX_POLYGONS);
     expect(prepared[0][1][0] - prepared[0][0][0]).toBeCloseTo(0.002);
+  });
+
+  it("connects close components into a super-region before applying the component limit", () => {
+    const closeGapDegrees = ZILLOW_SUPER_REGION_INITIAL_GAP_MILES / 80;
+    const polygons = [
+      [
+        [-84.3, 33.9],
+        [-84.29, 33.9],
+        [-84.29, 33.91],
+        [-84.3, 33.91],
+        [-84.3, 33.9],
+      ],
+      [
+        [-84.29 + closeGapDegrees, 33.9],
+        [-84.28 + closeGapDegrees, 33.9],
+        [-84.28 + closeGapDegrees, 33.91],
+        [-84.29 + closeGapDegrees, 33.91],
+        [-84.29 + closeGapDegrees, 33.9],
+      ],
+    ] as [number, number][][];
+
+    expect(preparePolygonsForZillow(polygons)).toHaveLength(1);
+  });
+
+  it("widens the connection gap when needed to retain the component budget", () => {
+    const square = (longitude: number, latitude: number) =>
+      [
+        [longitude, latitude],
+        [longitude + 0.005, latitude],
+        [longitude + 0.005, latitude + 0.005],
+        [longitude, latitude + 0.005],
+        [longitude, latitude],
+      ] as [number, number][];
+    const adaptiveGapDegrees =
+      (ZILLOW_SUPER_REGION_INITIAL_GAP_MILES + 0.2) / 57;
+    const nearbyPair = [
+      square(-84.4, 33.9),
+      square(-84.395 + adaptiveGapDegrees, 33.9),
+    ];
+    const distantComponents = Array.from(
+      { length: ZILLOW_MAX_POLYGONS - 1 },
+      (_, index) => square(-84.2 + index * 0.04, 34.1),
+    );
+
+    const prepared = preparePolygonsForZillow([
+      ...nearbyPair,
+      ...distantComponents,
+    ]);
+    const widestComponent = Math.max(
+      ...prepared.map((candidate) => {
+        const longitudes = candidate.map(([longitude]) => longitude);
+        return Math.max(...longitudes) - Math.min(...longitudes);
+      }),
+    );
+
+    expect(prepared).toHaveLength(ZILLOW_MAX_POLYGONS);
+    expect(widestComponent).toBeGreaterThan(0.01);
+  });
+
+  it("keeps components separate when their gap exceeds the super-region distance", () => {
+    const farGapDegrees = ZILLOW_SUPER_REGION_MAX_GAP_MILES / 35;
+    const polygons = [
+      [
+        [-84.3, 33.9],
+        [-84.29, 33.9],
+        [-84.29, 33.91],
+        [-84.3, 33.91],
+        [-84.3, 33.9],
+      ],
+      [
+        [-84.29 + farGapDegrees, 33.9],
+        [-84.28 + farGapDegrees, 33.9],
+        [-84.28 + farGapDegrees, 33.91],
+        [-84.29 + farGapDegrees, 33.91],
+        [-84.29 + farGapDegrees, 33.9],
+      ],
+    ] as [number, number][][];
+
+    expect(preparePolygonsForZillow(polygons)).toHaveLength(2);
   });
 
   it("extracts outer rings from polygon and multipolygon features", () => {
