@@ -54,7 +54,7 @@ export default defineExtension({
     {
       kind: "surface",
       id: "travel-time",
-      name: "Commute",
+      name: "Commute (20-min layers)",
       initialState: {} satisfies CommuteHeatmapState,
       Controls: CommuteHeatmapControls,
       load: async ({ address }: CommuteHeatmapState, context) => {
@@ -69,7 +69,7 @@ export default defineExtension({
         }
         const collection = await loadDrivingIsochrones(
           address,
-          [15, 20, 25, 35, 40, 45],
+          [20, 40],
           context.signal,
         );
         return {
@@ -78,14 +78,9 @@ export default defineExtension({
         };
       },
       style: {
-        opacity: 0.82,
+        opacity: 0.5,
         colorRamp: [
-          [0, "rgba(250, 204, 21, 0)"],
-          [0.15, "rgba(250, 204, 21, 0.18)"],
-          [0.32, "rgba(250, 204, 21, 0.72)"],
-          [0.5, "#facc15"],
-          [0.68, "#d9d92a"],
-          [0.85, "#84cc16"],
+          [0, "#facc15"],
           [1, "#16a34a"],
         ],
       },

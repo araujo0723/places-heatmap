@@ -226,9 +226,9 @@ contour:
 - **Commute** under Filters draws a red outline and constrains all active
   data to the selected 5–60 minute region. The slider advances in five-minute
   intervals.
-- **Commute** under Heatmaps accepts only an address. It renders exact
-  20- and 40-minute contours with additional five-minute transition bands,
-  fading from green through yellow to transparent.
+- **Commute (20-min layers)** under Heatmaps accepts only an address. It
+  renders a solid green 0–20 minute region and a solid yellow 20–40 minute
+  region. Travel times beyond 40 minutes are not displayed.
 
 Address suggestions use openrouteservice when configured and fall back to
 Nominatim. Routing requests and the API key remain server-side.

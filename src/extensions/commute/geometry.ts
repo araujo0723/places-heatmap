@@ -13,18 +13,10 @@ import type {
   SurfaceProperties,
 } from "../api";
 
-const CONTOUR_WEIGHTS = new Map([
-  [15, 1],
-  [20, 0.85],
-  [25, 0.68],
-  [35, 0.5],
-  [40, 0.32],
-  [45, 0.08],
+const LAYER_WEIGHTS = new Map([
+  [20, 1],
+  [40, 0],
 ]);
-
-function commuteWeight(minutes: number) {
-  return CONTOUR_WEIGHTS.get(minutes) ?? Math.max(0, 1 - minutes / 45);
-}
 
 export function commuteHeatSurface(
   collection: FeatureCollection<
@@ -32,10 +24,12 @@ export function commuteHeatSurface(
     IsochroneProperties
   >,
 ): FeatureCollection<RegionGeometry, SurfaceProperties> {
-  const contours = [...collection.features].sort(
-    (first, second) =>
-      first.properties.minutes - second.properties.minutes,
-  );
+  const contours = collection.features
+    .filter(({ properties }) => LAYER_WEIGHTS.has(properties.minutes))
+    .sort(
+      (first, second) =>
+        first.properties.minutes - second.properties.minutes,
+    );
   const features: Array<
     Feature<Polygon | MultiPolygon, SurfaceProperties>
   > = [];
@@ -52,7 +46,7 @@ export function commuteHeatSurface(
       ...band,
       id: `commute-${contour.properties.minutes}-minutes`,
       properties: {
-        weight: commuteWeight(contour.properties.minutes),
+        weight: LAYER_WEIGHTS.get(contour.properties.minutes)!,
         minutes: contour.properties.minutes,
       },
     });

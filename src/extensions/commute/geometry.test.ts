@@ -22,22 +22,21 @@ function square(size: number, minutes: number) {
 }
 
 describe("commute heat geometry", () => {
-  it("turns nested contours into weighted, non-overlapping bands", () => {
+  it("creates solid, non-overlapping 0–20 and 20–40 minute layers", () => {
     const contours: FeatureCollection<Polygon, IsochroneProperties> = {
       type: "FeatureCollection",
-      features: [square(2, 20), square(1, 15), square(3, 40)],
+      features: [square(2, 20), square(4, 45), square(3, 40)],
     };
 
     const surface = commuteHeatSurface(contours);
 
     expect(surface.features.map((feature) => feature.id)).toEqual([
-      "commute-15-minutes",
       "commute-20-minutes",
       "commute-40-minutes",
     ]);
     expect(
       surface.features.map((feature) => feature.properties.weight),
-    ).toEqual([1, 0.85, 0.32]);
+    ).toEqual([1, 0]);
     expect(surface.features[1].geometry.type).toBe("Polygon");
     expect(
       surface.features[1].geometry.type === "Polygon"

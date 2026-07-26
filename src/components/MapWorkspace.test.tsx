@@ -219,7 +219,7 @@ const contributionLabels: Record<string, string> = {
   "commute/time": "Commute",
   "nearby-parks/influence": "Parks",
   "nearby-water/influence": "Lakes",
-  "commute/travel-time": "Commute",
+  "commute/travel-time": "Commute (20-min layers)",
   "zillow/preview": "Zillow Preview Region",
   "test/reject-all": "Reject all",
   "test/points": "Test points",
@@ -1243,6 +1243,9 @@ describe("MapWorkspace", () => {
     await drawArea(user);
     await addContribution(user, "Heatmap", "commute/travel-time");
 
+    expect(
+      screen.getAllByText("Commute (20-min layers)").length,
+    ).toBeGreaterThan(0);
     expect(
       screen.getByRole("textbox", { name: "Commute address" }),
     ).toBeInTheDocument();
