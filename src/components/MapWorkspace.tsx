@@ -382,12 +382,14 @@ function Status({
   runtime,
   onRetry,
   enabled = true,
+  showSettledStatus = true,
 }: {
   runtime?: FilterRuntime | HeatmapRuntime;
   onRetry: () => void;
   enabled?: boolean;
+  showSettledStatus?: boolean;
 }) {
-  if (!enabled) {
+  if (!enabled && showSettledStatus) {
     return (
       <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
         <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
@@ -432,6 +434,8 @@ function Status({
       </div>
     );
   }
+
+  if (!showSettledStatus) return null;
 
   return (
     <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700">
@@ -1660,6 +1664,7 @@ export default function MapWorkspace() {
                           <Status
                             runtime={runtime}
                             enabled={enabled}
+                            showSettledStatus={false}
                             onRetry={() =>
                               setActiveFilters((current) =>
                                 current.map((item) =>

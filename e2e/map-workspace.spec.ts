@@ -131,7 +131,11 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
   await page
     .getByLabel("Filter", { exact: true })
     .selectOption("nearby-parks/distance");
-  await expect(page.getByText("Active", { exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("slider", { name: "Park distance" }),
+  ).toBeEnabled();
+  await expect(page.getByText("Active", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Off", { exact: true })).toHaveCount(0);
 
   await page.getByRole("slider", { name: "Park distance" }).fill("0");
 

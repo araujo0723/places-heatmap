@@ -547,7 +547,10 @@ describe("MapWorkspace", () => {
       screen.getByLabelText("Filter"),
       "nearby-parks/distance",
     );
-    await screen.findByText("Active");
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.queryByText("Loading")).not.toBeInTheDocument(),
+    );
     const requestCount = fetchMock.mock.calls.length;
     const map = (
       MapLibreMap as unknown as {
@@ -592,7 +595,7 @@ describe("MapWorkspace", () => {
     });
 
     expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1");
-    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(requestCount);
 
     fireEvent.pointerUp(overlay, {
@@ -787,6 +790,65 @@ describe("MapWorkspace", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("shows status only while a filter is loading or reloading", async () => {
+    const pendingResponses: Array<(response: Response) => void> = [];
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          pendingResponses.push(resolve);
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await screen.findByText("Centered near you");
+    await drawArea(user);
+    await user.selectOptions(
+      screen.getByLabelText("Filter"),
+      "nearby-parks/distance",
+    );
+
+    expect(await screen.findByText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
+    expect(screen.queryByText("Off")).not.toBeInTheDocument();
+
+    await act(async () => {
+      pendingResponses[0](
+        Response.json({
+          tiles: [],
+          parks: [],
+        }),
+      );
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("Loading")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
+
+    clearNearbyParkCache();
+    const slider = screen.getByRole("slider", { name: "Park distance" });
+    fireEvent.change(slider, { target: { value: "350" } });
+    fireEvent.pointerUp(slider);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+
+    await act(async () => {
+      pendingResponses[1](
+        Response.json({
+          tiles: [],
+          parks: [],
+        }),
+      );
+    });
+    await waitFor(() =>
+      expect(screen.queryByText("Loading")).not.toBeInTheDocument(),
+    );
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
+    expect(screen.queryByText("Off")).not.toBeInTheDocument();
+  });
+
   it("toggles a filter immediately without reloading its data", async () => {
     const fetchMock = vi.fn(async () =>
       Response.json({
@@ -835,6 +897,7 @@ describe("MapWorkspace", () => {
       ).toHaveLength(1),
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
 
     const toggle = screen.getByRole("switch", {
       name: "Park distance enabled",
@@ -844,7 +907,7 @@ describe("MapWorkspace", () => {
     await user.click(toggle);
 
     expect(toggle).toHaveAttribute("aria-checked", "false");
-    expect(screen.getByText("Off")).toBeInTheDocument();
+    expect(screen.queryByText("Off")).not.toBeInTheDocument();
     expect(
       screen.getByRole("slider", { name: "Park distance" }),
     ).toBeDisabled();
@@ -858,7 +921,7 @@ describe("MapWorkspace", () => {
     await user.click(toggle);
 
     expect(toggle).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
     await waitFor(() =>
       expect(
         map.getSource("filter-owned-regions-source")?.data.features,
@@ -914,13 +977,9 @@ describe("MapWorkspace", () => {
       screen.getByLabelText("Filter"),
       "nearby-parks/distance",
     );
-    await screen.findByText("Active");
     await user.selectOptions(
       screen.getByLabelText("Filter"),
       "nearby-water/distance",
-    );
-    await waitFor(() =>
-      expect(screen.getAllByText("Active")).toHaveLength(2),
     );
 
     const map = (
@@ -1060,7 +1119,14 @@ describe("MapWorkspace", () => {
       ),
     );
 
-    await screen.findByText("Active");
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          ([input]) => String(input) === "/api/commute/isochrones",
+        ),
+      ).toBe(true),
+    );
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
     expect(screen.getByRole("slider", { name: "Commute time" })).toHaveAttribute(
       "min",
       "5",
