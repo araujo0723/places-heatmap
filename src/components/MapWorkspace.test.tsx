@@ -787,6 +787,86 @@ describe("MapWorkspace", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("toggles a filter immediately without reloading its data", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({
+        tiles: [],
+        parks: [
+          {
+            id: "way/1",
+            name: "Box Park",
+            center: [-0.115, 51.512],
+            bbox: {
+              west: -0.12,
+              south: 51.51,
+              east: -0.11,
+              north: 51.515,
+            },
+          },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await screen.findByText("Centered near you");
+    (
+      MapLibreMap as unknown as {
+        lastInstance: { setCenter(center: [number, number]): void };
+      }
+    ).lastInstance.setCenter([-0.115, 51.512]);
+    await drawArea(user);
+    await user.selectOptions(
+      screen.getByLabelText("Filter"),
+      "nearby-parks/distance",
+    );
+
+    const map = (
+      MapLibreMap as unknown as {
+        lastInstance: {
+          getSource(id: string): { data: FeatureCollection } | undefined;
+        };
+      }
+    ).lastInstance;
+    await waitFor(() =>
+      expect(
+        map.getSource("filter-owned-regions-source")?.data.features,
+      ).toHaveLength(1),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const toggle = screen.getByRole("switch", {
+      name: "Park distance enabled",
+    });
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText("Off")).toBeInTheDocument();
+    expect(
+      screen.getByRole("slider", { name: "Park distance" }),
+    ).toBeDisabled();
+    await waitFor(() =>
+      expect(
+        map.getSource("filter-owned-regions-source")?.data.features,
+      ).toHaveLength(0),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await user.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("Active")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        map.getSource("filter-owned-regions-source")?.data.features,
+      ).toHaveLength(1),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("draws only the common boundary of park and water filters", async () => {
     vi.stubGlobal(
       "fetch",

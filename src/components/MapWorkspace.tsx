@@ -381,10 +381,21 @@ function SectionHeading({
 function Status({
   runtime,
   onRetry,
+  enabled = true,
 }: {
   runtime?: FilterRuntime | HeatmapRuntime;
   onRetry: () => void;
+  enabled?: boolean;
 }) {
+  if (!enabled) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
+        <span className="h-1.5 w-1.5 rounded-full bg-slate-300" />
+        Off
+      </span>
+    );
+  }
+
   if (!runtime) return null;
 
   if (runtime.status === "loading") {
@@ -502,6 +513,9 @@ export default function MapWorkspace() {
   const [areaOfInterest, setAreaOfInterest] = useState<Feature<Polygon>>();
   const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
+  const [enabledFilterIds, setEnabledFilterIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [activeHeatmaps, setActiveHeatmaps] = useState<ActiveHeatmap[]>([]);
   const [filterRuntime, setFilterRuntime] = useState<
     Record<string, FilterRuntime>
@@ -942,19 +956,26 @@ export default function MapWorkspace() {
     return () => controller.abort();
   }, [activeHeatmaps, areaOfInterest]);
 
+  const enabledFilters = useMemo(
+    () =>
+      activeFilters.filter(({ instanceId }) =>
+        enabledFilterIds.has(instanceId),
+      ),
+    [activeFilters, enabledFilterIds],
+  );
   const predicates = useMemo(
     () =>
-      activeFilters
+      enabledFilters
         .map(({ instanceId }) => filterRuntime[instanceId]?.predicate)
         .filter((predicate): predicate is PointPredicate => !!predicate),
-    [activeFilters, filterRuntime],
+    [enabledFilters, filterRuntime],
   );
   const regionFilters = useMemo(
     () =>
-      activeFilters.filter(
+      enabledFilters.filter(
         ({ entry }) => !!entry.contribution.resolveRegions,
       ),
-    [activeFilters],
+    [enabledFilters],
   );
   const constrainedBoundary = useMemo(() => {
     if (!areaOfInterest) return undefined;
@@ -1004,7 +1025,7 @@ export default function MapWorkspace() {
     !mapReady ||
     !areaOfInterest ||
     !constrainedBoundary ||
-    activeFilters.some(
+    enabledFilters.some(
       ({ instanceId, entry }) => {
         const runtime = filterRuntime[instanceId];
         return (
@@ -1015,7 +1036,7 @@ export default function MapWorkspace() {
       },
     );
 
-  const filtersBlocked = activeFilters.some(
+  const filtersBlocked = enabledFilters.some(
     ({ instanceId }) => !filterRuntime[instanceId]?.predicate,
   );
 
@@ -1251,16 +1272,18 @@ export default function MapWorkspace() {
     if (!entry) return;
     contributionInstanceRef.current += 1;
     const randomSeed = Math.floor(Math.random() * 2_147_483_647);
+    const instanceId = `filter-${contributionInstanceRef.current}`;
     setActiveFilters((current) => [
       ...current,
       {
-        instanceId: `filter-${contributionInstanceRef.current}`,
+        instanceId,
         entry,
         state: entry.contribution.initialState,
         revision: 0,
         randomSeed,
       },
     ]);
+    setEnabledFilterIds((current) => new Set(current).add(instanceId));
   };
 
   const addHeatmap = (key: string) => {
@@ -1464,6 +1487,7 @@ export default function MapWorkspace() {
     drawRef.current?.setMode("select");
     setAreaOfInterest(undefined);
     setActiveFilters([]);
+    setEnabledFilterIds(new Set());
     setActiveHeatmaps([]);
     setFilterRuntime({});
     setHeatmapRuntime({});
@@ -1618,10 +1642,15 @@ export default function MapWorkspace() {
                 {activeFilters.map((selection) => {
                   const runtime = filterRuntime[selection.instanceId];
                   const Controls = selection.entry.contribution.Controls;
+                  const enabled = enabledFilterIds.has(selection.instanceId);
                   return (
                     <article
                       key={selection.instanceId}
-                      className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm"
+                      className={`rounded-xl border bg-white p-3 shadow-sm transition-opacity ${
+                        enabled
+                          ? "border-slate-200"
+                          : "border-slate-200/70 opacity-70"
+                      }`}
                     >
                       <div className="flex items-start justify-between gap-3">
                         <p className="min-w-0 truncate text-xs font-semibold text-slate-900">
@@ -1630,6 +1659,7 @@ export default function MapWorkspace() {
                         <div className="flex items-center gap-2">
                           <Status
                             runtime={runtime}
+                            enabled={enabled}
                             onRetry={() =>
                               setActiveFilters((current) =>
                                 current.map((item) =>
@@ -1641,6 +1671,34 @@ export default function MapWorkspace() {
                             }
                           />
                           <button
+                            aria-checked={enabled}
+                            aria-label={`${selection.entry.contribution.name} enabled`}
+                            className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors focus:ring-2 focus:ring-indigo-400 focus:ring-offset-1 focus:outline-none ${
+                              enabled ? "bg-indigo-600" : "bg-slate-300"
+                            }`}
+                            role="switch"
+                            title={`${enabled ? "Disable" : "Enable"} ${selection.entry.contribution.name}`}
+                            type="button"
+                            onClick={() =>
+                              setEnabledFilterIds((current) => {
+                                const next = new Set(current);
+                                if (enabled) {
+                                  next.delete(selection.instanceId);
+                                } else {
+                                  next.add(selection.instanceId);
+                                }
+                                return next;
+                              })
+                            }
+                          >
+                            <span
+                              aria-hidden="true"
+                              className={`h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform ${
+                                enabled ? "translate-x-4.5" : "translate-x-0.5"
+                              }`}
+                            />
+                          </button>
+                          <button
                             aria-label={`Remove ${selection.entry.contribution.name}`}
                             className="rounded-md px-1.5 py-0.5 text-lg leading-none text-slate-300 hover:bg-slate-100 hover:text-slate-600 focus:ring-2 focus:ring-slate-300 focus:outline-none"
                             type="button"
@@ -1651,6 +1709,11 @@ export default function MapWorkspace() {
                                     item.instanceId !== selection.instanceId,
                                 ),
                               );
+                              setEnabledFilterIds((current) => {
+                                const next = new Set(current);
+                                next.delete(selection.instanceId);
+                                return next;
+                              });
                             }}
                           >
                             ×
@@ -1660,7 +1723,7 @@ export default function MapWorkspace() {
                       <div className="mt-3 border-t border-slate-100 pt-3">
                         <Controls
                           value={selection.state}
-                          disabled={false}
+                          disabled={!enabled}
                           loading={runtime?.status === "loading"}
                           viewport={actionViewport}
                           onChange={(state) =>
@@ -1857,19 +1920,19 @@ export default function MapWorkspace() {
             {drawError}
           </TransientSnack>
         ) : null}
-        {activeFilters.length || activeHeatmaps.length ? (
+        {enabledFilters.length || activeHeatmaps.length ? (
           <div
             className="flex flex-col items-end gap-2"
             data-testid="map-active-summary"
           >
-            {activeFilters.length ? (
+            {enabledFilters.length ? (
               <TransientSnack
-                resetKey={activeFilters
+                resetKey={enabledFilters
                   .map(({ instanceId }) => instanceId)
                   .join(",")}
               >
-                {activeFilters.length} active{" "}
-                {activeFilters.length === 1 ? "filter" : "filters"}
+                {enabledFilters.length} active{" "}
+                {enabledFilters.length === 1 ? "filter" : "filters"}
               </TransientSnack>
             ) : null}
             {activeHeatmaps.map(({ entry, instanceId }) => (
