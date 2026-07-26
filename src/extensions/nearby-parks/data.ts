@@ -1,4 +1,10 @@
-import { boundsIntersect, MAX_PARK_TILES, parkQueryCoverage, tileKey } from "../../core/geo";
+import {
+  boundsIntersect,
+  MAX_PARK_TILES,
+  parkQueryCoverage,
+  tileKey,
+  type MapTile,
+} from "../../core/geo";
 import type { ParkRecord } from "../../core/parks";
 import type { MapViewport } from "../api";
 
@@ -39,37 +45,56 @@ function parkBounds(park: ParkRecord) {
   );
 }
 
+function tileBatches(tiles: MapTile[]) {
+  return Array.from(
+    { length: Math.ceil(tiles.length / MAX_PARK_TILES) },
+    (_, index) =>
+      tiles.slice(
+        index * MAX_PARK_TILES,
+        (index + 1) * MAX_PARK_TILES,
+      ),
+  );
+}
+
+async function loadParkBatch(tiles: MapTile[]) {
+  const tileKeys = tiles.map(tileKey).sort();
+  const response = await fetch(
+    `/api/parks?tiles=${encodeURIComponent(tileKeys.join(","))}`,
+  );
+  const payload = (await response.json().catch(() => ({}))) as
+    | ParkResponse
+    | { error?: unknown };
+  if (!response.ok) {
+    throw new Error(
+      typeof (payload as { error?: unknown }).error === "string"
+        ? String((payload as { error: string }).error)
+        : "Nearby parks could not be loaded.",
+    );
+  }
+  const parks = (payload as ParkResponse).parks;
+  if (!Array.isArray(parks) || !parks.every(isParkRecord)) {
+    throw new Error("Nearby parks returned malformed data.");
+  }
+  return parks;
+}
+
 export async function loadNearbyParks(
   viewport: MapViewport,
   signal: AbortSignal,
 ): Promise<ParkRecord[]> {
   const coverage = parkQueryCoverage(viewport);
-  if (coverage.tiles.length > MAX_PARK_TILES) {
-    throw new Error("Zoom in to search for nearby parks.");
-  }
   const now = Date.now();
   let entry = cache.get(coverage.key);
   if (!entry || entry.expiresAt <= now) {
-    const tileKeys = coverage.tiles.map(tileKey).sort();
-    const promise = fetch(
-      `/api/parks?tiles=${encodeURIComponent(tileKeys.join(","))}`,
+    const promise = Promise.all(
+      tileBatches(coverage.tiles).map(loadParkBatch),
     )
-      .then(async (response) => {
-        const payload = (await response.json().catch(() => ({}))) as
-          | ParkResponse
-          | { error?: unknown };
-        if (!response.ok) {
-          throw new Error(
-            typeof (payload as { error?: unknown }).error === "string"
-              ? String((payload as { error: string }).error)
-              : "Nearby parks could not be loaded.",
-          );
+      .then((batches) => {
+        const parks = new Map<string, ParkRecord>();
+        for (const batch of batches) {
+          for (const park of batch) parks.set(park.id, park);
         }
-        const parks = (payload as ParkResponse).parks;
-        if (!Array.isArray(parks) || !parks.every(isParkRecord)) {
-          throw new Error("Nearby parks returned malformed data.");
-        }
-        return parks;
+        return [...parks.values()];
       })
       .catch((error) => {
         cache.delete(coverage.key);

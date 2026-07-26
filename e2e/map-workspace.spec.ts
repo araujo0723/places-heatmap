@@ -59,7 +59,9 @@ test("starts with the bundled data contributions", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Area of interest" }))
     .toBeVisible();
   await expect(page.getByRole("button", { name: "Draw area" })).toBeEnabled();
-  await expect(page.getByRole("button", { name: "RESET" })).toBeDisabled();
+  await expect(
+    page.getByRole("button", { name: "RESET WORKSPACE" }),
+  ).toBeDisabled();
   await expect(filterSelector).toBeDisabled();
   await expect(heatmapSelector).toBeDisabled();
   await expect(filterSelector.locator("option")).toHaveCount(4);
@@ -270,7 +272,12 @@ test("draws one Area of Interest and resets the workspace with confirmation", as
   await expect(page.getByTestId("draw-preview")).toHaveCount(0);
   await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
   await expect(drawButton).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "RESET" })).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "RESET WORKSPACE" }),
+  ).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "Redefine area" }),
+  ).toBeEnabled();
   await page.addStyleTag({
     content:
       ".maplibregl-user-location-dot,.maplibregl-user-location-accuracy-circle{display:none!important}",
@@ -285,7 +292,7 @@ test("draws one Area of Interest and resets the workspace with confirmation", as
     },
     maxDiffPixelRatio: 0.01,
   });
-  await page.getByRole("button", { name: "RESET" }).click();
+  await page.getByRole("button", { name: "RESET WORKSPACE" }).click();
   await expect(
     page.getByRole("dialog", { name: "Reset the workspace?" }),
   ).toBeVisible();

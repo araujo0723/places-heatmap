@@ -28,6 +28,7 @@ export interface CommuteServiceDependencies {
   orsApiKey?: string;
   nominatimBaseUrl?: string;
   orsBaseUrl?: string;
+  proximity?: Coordinate;
 }
 
 const NOMINATIM_BASE_URL = "https://nominatim.openstreetmap.org";
@@ -114,6 +115,37 @@ function dedupeSuggestions(suggestions: AddressSuggestion[]) {
   });
 }
 
+function distanceSquared(
+  [longitude, latitude]: Coordinate,
+  [otherLongitude, otherLatitude]: Coordinate,
+) {
+  const latitudeScale = Math.cos(
+    (((latitude + otherLatitude) / 2) * Math.PI) / 180,
+  );
+  const longitudeDelta =
+    ((((longitude - otherLongitude) % 360) + 540) % 360) - 180;
+  const latitudeDelta = latitude - otherLatitude;
+  return (
+    (longitudeDelta * latitudeScale) ** 2 + latitudeDelta * latitudeDelta
+  );
+}
+
+function prioritizeNearbySuggestions(
+  suggestions: AddressSuggestion[],
+  proximity: Coordinate | undefined,
+) {
+  if (!proximity) return suggestions;
+  return suggestions
+    .map((suggestion, index) => ({ suggestion, index }))
+    .sort(
+      (first, second) =>
+        distanceSquared(first.suggestion.center, proximity) -
+          distanceSquared(second.suggestion.center, proximity) ||
+        first.index - second.index,
+    )
+    .map(({ suggestion }) => suggestion);
+}
+
 export function normalizeNominatimSuggestions(
   payload: unknown,
 ): AddressSuggestion[] {
@@ -181,6 +213,16 @@ async function requestOrsSuggestions(
   url.searchParams.set("api_key", apiKey);
   url.searchParams.set("text", query);
   url.searchParams.set("size", "6");
+  if (dependencies.proximity) {
+    url.searchParams.set(
+      "focus.point.lon",
+      String(dependencies.proximity[0]),
+    );
+    url.searchParams.set(
+      "focus.point.lat",
+      String(dependencies.proximity[1]),
+    );
+  }
   const payload = await fetchJson(
     url,
     { headers: { Accept: "application/json" } },
@@ -201,6 +243,14 @@ async function requestNominatimSuggestions(
   url.searchParams.set("format", "jsonv2");
   url.searchParams.set("limit", "6");
   url.searchParams.set("addressdetails", "1");
+  if (dependencies.proximity) {
+    const [longitude, latitude] = dependencies.proximity;
+    const west = Math.max(-180, longitude - 1);
+    const east = Math.min(180, longitude + 1);
+    const north = Math.min(90, latitude + 1);
+    const south = Math.max(-90, latitude - 1);
+    url.searchParams.set("viewbox", `${west},${north},${east},${south}`);
+  }
   const payload = await fetchJson(
     url,
     {
@@ -223,7 +273,11 @@ export async function lookupAddressSuggestions(
   if (normalized.length < 3) return [];
 
   return withMemoryCache(
-    `commute-address:${normalized.toLowerCase()}`,
+    `commute-address:${normalized.toLowerCase()}:${
+      dependencies.proximity
+        ? dependencies.proximity.map((coordinate) => coordinate.toFixed(3)).join(",")
+        : "global"
+    }`,
     14 * 24 * 60 * 60 * 1_000,
     async () => {
       const apiKey = dependencies.orsApiKey ?? serverEnvironmentValue("ORS_API_KEY");
@@ -234,12 +288,20 @@ export async function lookupAddressSuggestions(
             apiKey,
             dependencies,
           );
-          if (suggestions.length > 0) return suggestions;
+          if (suggestions.length > 0) {
+            return prioritizeNearbySuggestions(
+              suggestions,
+              dependencies.proximity,
+            );
+          }
         } catch {
           // Nominatim is the public fallback for address lookup only.
         }
       }
-      return requestNominatimSuggestions(normalized, dependencies);
+      return prioritizeNearbySuggestions(
+        await requestNominatimSuggestions(normalized, dependencies),
+        dependencies.proximity,
+      );
     },
   );
 }

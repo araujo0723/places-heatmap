@@ -128,8 +128,9 @@ tab. The action is disabled until an Area of Interest exists.
 - Select **Draw area**, then press and drag between opposite corners of a
   rectangle. It cannot be more than 50 miles across in either
   dimension.
-- The completed area remains selectable and editable on the map. **RESET**
-  removes it along with every configured filter and heatmap after confirmation.
+- **Redefine area** lets you draw and validate a replacement while the current
+  area, filters, and heatmaps remain active. **RESET WORKSPACE** removes the
+  area along with every configured filter and heatmap after confirmation.
 - Active extension filters combine with AND semantics.
 - Region-producing filters add host-rendered, non-editable regions. Their
   controls replace those regions, removing the filter removes them, and their
@@ -148,8 +149,8 @@ between its filter and heatmap.
   park, from 0 to 2,000 m.
 - **Park influence** renders a full-strength park core and twelve geographic
   contour bands fading to zero at 300 m.
-- Views covering more than 25 cache tiles retain stale data and ask the user to
-  zoom in.
+- Large areas are split into API requests of at most 25 cache tiles and their
+  park records are merged before filtering.
 
 ## Nearby water
 

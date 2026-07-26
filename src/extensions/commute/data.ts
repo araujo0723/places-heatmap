@@ -38,9 +38,15 @@ function isAddressSelection(value: unknown): value is AddressSelection {
 export async function searchAddresses(
   query: string,
   signal: AbortSignal,
+  proximity: [number, number],
 ): Promise<AddressSelection[]> {
+  const parameters = new URLSearchParams({
+    q: query,
+    longitude: String(proximity[0]),
+    latitude: String(proximity[1]),
+  });
   const response = await fetch(
-    `/api/address-suggestions?q=${encodeURIComponent(query)}`,
+    `/api/address-suggestions?${parameters}`,
     { signal },
   );
   const payload = (await response.json().catch(() => ({}))) as {

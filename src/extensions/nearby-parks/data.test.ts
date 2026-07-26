@@ -1,4 +1,8 @@
 import { vi } from "vitest";
+import {
+  MAX_PARK_TILES,
+  parkQueryCoverage,
+} from "../../core/geo";
 import type { MapViewport } from "../api";
 import { clearNearbyParkCache, loadNearbyParks } from "./data";
 
@@ -41,5 +45,44 @@ describe("nearby park client loading", () => {
     ).rejects.toThrow("malformed");
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
-});
 
+  it("splits large areas into valid API batches and merges duplicate parks", async () => {
+    const largeViewport: MapViewport = {
+      center: [-84.295, 34.075],
+      bounds: {
+        west: -84.73,
+        south: 33.71,
+        east: -83.86,
+        north: 34.44,
+      },
+    };
+    const tileCount = parkQueryCoverage(largeViewport).tiles.length;
+    expect(tileCount).toBeGreaterThan(MAX_PARK_TILES);
+
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
+      Response.json({
+        parks: [
+          { id: "node/shared", center: [-84.295, 34.075] },
+        ],
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      loadNearbyParks(largeViewport, new AbortController().signal),
+    ).resolves.toEqual([
+      { id: "node/shared", center: [-84.295, 34.075] },
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(
+      Math.ceil(tileCount / MAX_PARK_TILES),
+    );
+    for (const [input] of fetchMock.mock.calls) {
+      const parameters = new URL(String(input), "http://localhost")
+        .searchParams;
+      expect(
+        parameters.get("tiles")?.split(",").length,
+      ).toBeLessThanOrEqual(MAX_PARK_TILES);
+    }
+  });
+});

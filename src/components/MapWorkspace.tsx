@@ -95,6 +95,8 @@ const DEFAULT_TILE_URL =
   "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const DEFAULT_ATTRIBUTION = "© OpenStreetMap contributors";
 const LAST_LOCATION_KEY = "places-heatmap:last-location";
+const AUTO_CENTER_ZOOM = 11.3;
+const SAME_LOCATION_THRESHOLD_METERS = 25;
 const EMPTY_COLLECTION: FeatureCollection<Point> = {
   type: "FeatureCollection",
   features: [],
@@ -154,6 +156,26 @@ function saveLastLocation(longitude: number, latitude: number) {
   } catch {
     // Location still works when browser storage is unavailable.
   }
+}
+
+function locationsAreEquivalent(
+  first: [number, number] | undefined,
+  second: [number, number],
+) {
+  if (!first) return false;
+  const radians = (degrees: number) => (degrees * Math.PI) / 180;
+  const latitudeDelta = radians(second[1] - first[1]);
+  const longitudeDelta = radians(second[0] - first[0]);
+  const firstLatitude = radians(first[1]);
+  const secondLatitude = radians(second[1]);
+  const haversine =
+    Math.sin(latitudeDelta / 2) ** 2 +
+    Math.cos(firstLatitude) *
+      Math.cos(secondLatitude) *
+      Math.sin(longitudeDelta / 2) ** 2;
+  const distanceMeters =
+    2 * 6_371_008.8 * Math.asin(Math.min(1, Math.sqrt(haversine)));
+  return distanceMeters <= SAME_LOCATION_THRESHOLD_METERS;
 }
 
 function errorMessage(error: unknown) {
@@ -350,7 +372,7 @@ function Status({
           className="max-w-36 truncate text-[11px] font-medium text-rose-600"
           title={runtime.error}
         >
-          {hasStaleValue ? "Stale" : "Error"}
+          {hasStaleValue ? "Stale" : (runtime.error ?? "Error")}
         </span>
         <button
           className="rounded-md bg-rose-50 px-2 py-1 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 focus:ring-2 focus:ring-rose-400 focus:outline-none"
@@ -492,7 +514,7 @@ export default function MapWorkspace() {
         container: mapContainerRef.current,
         style: baseStyle(tileUrl, attribution),
         center: lastLocation ?? [-0.115, 51.512],
-        zoom: 12.3,
+        zoom: AUTO_CENTER_ZOOM,
         attributionControl: false,
       });
       mapRef.current = map;
@@ -511,7 +533,7 @@ export default function MapWorkspace() {
           maximumAge: 60_000,
         },
         fitBoundsOptions: {
-          maxZoom: 12,
+          maxZoom: AUTO_CENTER_ZOOM,
           duration: 0,
           padding: { top: 80, right: 80, bottom: 80, left: 420 },
         },
@@ -519,16 +541,38 @@ export default function MapWorkspace() {
         showUserLocation: true,
         showAccuracyCircle: true,
       });
+      // MapLibre always updates the camera before emitting "geolocate".
+      // Control that hook so a matching cached fix causes no camera movement
+      // and every actual location change uses the same workspace zoom.
+      (
+        geolocate as unknown as {
+          _updateCamera: (position: GeolocationPosition) => void;
+        }
+      )._updateCamera = (position) => {
+        const nextLocation: [number, number] = [
+          position.coords.longitude,
+          position.coords.latitude,
+        ];
+        if (locationsAreEquivalent(lastLocationRef.current, nextLocation)) {
+          return;
+        }
+        map.jumpTo({
+          center: nextLocation,
+          zoom: AUTO_CENTER_ZOOM,
+        });
+      };
       geolocate.on("geolocate", (event) => {
         const position = event as unknown as Partial<GeolocationPosition>;
         if (
           typeof position.coords?.longitude === "number" &&
           typeof position.coords.latitude === "number"
         ) {
-          saveLastLocation(
+          const nextLocation: [number, number] = [
             position.coords.longitude,
             position.coords.latitude,
-          );
+          ];
+          lastLocationRef.current = nextLocation;
+          saveLastLocation(...nextLocation);
         }
         setLocationStatus("located");
       });
@@ -595,7 +639,9 @@ export default function MapWorkspace() {
                 previous as GeoJSONStoreFeatures<Polygon>,
               ]);
               restoringAreaRef.current = false;
-              setDrawError("Use RESET to remove the Area of Interest.");
+              setDrawError(
+                "Use RESET WORKSPACE to remove the Area of Interest.",
+              );
             }
             return;
           }
@@ -1325,7 +1371,22 @@ export default function MapWorkspace() {
       );
       return;
     }
-    const [validation] = draw.addFeatures([feature]);
+    const previousFeatureIds = draw
+      .getSnapshot()
+      .map(({ id }) => id)
+      .filter((id): id is string | number => id !== undefined);
+    const [validation] = (() => {
+      resettingDrawRef.current = true;
+      try {
+        const result = draw.addFeatures([feature]);
+        if (result[0]?.valid && previousFeatureIds.length > 0) {
+          draw.removeFeatures(previousFeatureIds);
+        }
+        return result;
+      } finally {
+        resettingDrawRef.current = false;
+      }
+    })();
 
     if (!validation?.valid) {
       updateDrawDraft([]);
@@ -1423,7 +1484,7 @@ export default function MapWorkspace() {
             disabled={!areaOfInterest}
             onClick={() => setResetConfirmationOpen(true)}
           >
-            RESET
+            RESET WORKSPACE
           </button>
 
           <section
@@ -1459,14 +1520,28 @@ export default function MapWorkspace() {
                 ) : null}
               </div>
             ) : (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-3">
-                <p className="text-xs font-semibold text-emerald-800">
-                  Area defined
-                </p>
-                <p className="mt-3 text-[11px] leading-4 text-slate-500">
-                  Select the area on the map to move or resize it.
-                  Filters and heatmaps are clipped to this area.
-                </p>
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+                <button
+                  className={`w-full rounded-lg px-3 py-2 text-xs font-semibold focus:ring-2 focus:ring-indigo-300 focus:outline-none ${
+                    drawMode === "rectangle"
+                      ? "bg-indigo-600 text-white shadow-sm"
+                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                  type="button"
+                  disabled={!mapReady}
+                  aria-pressed={drawMode === "rectangle"}
+                  onClick={startDrawing}
+                >
+                  Redefine area
+                </button>
+                {drawMode === "rectangle" ? (
+                  <p className="mt-3 text-[11px] leading-4 text-slate-500">
+                    Draw a replacement rectangle no more than{" "}
+                    {MAX_AREA_OF_INTEREST_DIMENSION_MILES} miles across.
+                    Existing filters and heatmaps stay active until the new
+                    area is valid.
+                  </p>
+                ) : null}
               </div>
             )}
           </section>
@@ -1555,6 +1630,7 @@ export default function MapWorkspace() {
                           value={selection.state}
                           disabled={false}
                           loading={runtime?.status === "loading"}
+                          viewport={actionViewport}
                           onChange={(state) =>
                             setActiveFilters((current) =>
                               current.map((item) =>
@@ -1636,6 +1712,7 @@ export default function MapWorkspace() {
                             value={selection.state}
                             disabled={false}
                             loading={runtime?.status === "loading"}
+                            viewport={actionViewport}
                             onChange={(state) =>
                               setActiveHeatmaps((current) =>
                                 current.map((item) =>

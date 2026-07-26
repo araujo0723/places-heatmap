@@ -55,6 +55,7 @@ export interface ControlProps<State> {
   onChange: (value: State) => void;
   disabled: boolean;
   loading: boolean;
+  viewport: MapViewport;
 }
 
 export interface ActionControlProps {

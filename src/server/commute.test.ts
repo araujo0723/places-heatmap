@@ -72,6 +72,49 @@ describe("commute data service", () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain("/search");
   });
 
+  it("biases address lookup and ranks nearby suggestions first", async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL | Request, _init?: RequestInit) =>
+        Response.json([
+          {
+            display_name: "Main Street, London",
+            lon: "-0.1276",
+            lat: "51.5034",
+          },
+          {
+            display_name: "Main Street, Atlanta, Georgia",
+            lon: "-84.39",
+            lat: "33.75",
+          },
+        ]),
+    );
+
+    await expect(
+      lookupAddressSuggestions("Main Street", {
+        fetch: fetchMock as typeof fetch,
+        nominatimBaseUrl: "https://nominatim.test",
+        orsApiKey: "",
+        proximity: [-84.388, 33.749],
+      }),
+    ).resolves.toEqual([
+      {
+        label: "Main Street, Atlanta, Georgia",
+        address: "Main Street, Atlanta, Georgia",
+        center: [-84.39, 33.75],
+      },
+      {
+        label: "Main Street, London",
+        address: "Main Street, London",
+        center: [-0.1276, 51.5034],
+      },
+    ]);
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(requestUrl.searchParams.get("viewbox")).toBe(
+      "-85.388,34.749,-83.388,32.749",
+    );
+  });
+
   it("requests destination driving contours and normalizes their minutes", async () => {
     const fetchMock = vi.fn(
       async (_input: string | URL | Request, _init?: RequestInit) =>

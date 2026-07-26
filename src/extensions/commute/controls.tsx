@@ -18,10 +18,12 @@ function AddressPicker({
   address,
   onChange,
   disabled,
+  proximity,
 }: {
   address?: AddressSelection;
   onChange: (address: AddressSelection | undefined) => void;
   disabled: boolean;
+  proximity: [number, number];
 }) {
   const listId = useId();
   const requestSequence = useRef(0);
@@ -29,6 +31,8 @@ function AddressPicker({
   const [suggestions, setSuggestions] = useState<AddressSelection[]>([]);
   const [message, setMessage] = useState<string>();
   const [searching, setSearching] = useState(false);
+  const proximityLongitude = proximity[0];
+  const proximityLatitude = proximity[1];
 
   useEffect(() => {
     if (address && query !== address.address) setQuery(address.address);
@@ -59,7 +63,11 @@ function AddressPicker({
       setSearching(true);
       setMessage(undefined);
       try {
-        const results = await searchAddresses(normalized, controller.signal);
+        const results = await searchAddresses(
+          normalized,
+          controller.signal,
+          proximity,
+        );
         if (sequence !== requestSequence.current) return;
         setSuggestions(results);
         setMessage(
@@ -83,7 +91,7 @@ function AddressPicker({
       window.clearTimeout(timeout);
       controller.abort();
     };
-  }, [address, query]);
+  }, [address, proximityLatitude, proximityLongitude, query]);
 
   return (
     <div className="space-y-2">
@@ -164,6 +172,7 @@ export function CommuteFilterControls({
   onChange,
   disabled,
   loading,
+  viewport,
 }: ControlProps<CommuteFilterState>) {
   const [minutes, setMinutes] = useState(value.minutes);
   const committedMinutes = useRef(value.minutes);
@@ -184,6 +193,7 @@ export function CommuteFilterControls({
       <AddressPicker
         address={value.address}
         disabled={disabled}
+        proximity={viewport.center}
         onChange={(address) => onChange({ ...value, address })}
       />
       <label className="block text-xs text-slate-600">
@@ -225,11 +235,13 @@ export function CommuteHeatmapControls({
   value,
   onChange,
   disabled,
+  viewport,
 }: ControlProps<CommuteHeatmapState>) {
   return (
     <AddressPicker
       address={value.address}
       disabled={disabled}
+      proximity={viewport.center}
       onChange={(address) => onChange({ address })}
     />
   );

@@ -22,6 +22,7 @@ vi.mock("maplibre-gl", () => {
     private layers = new Map<string, unknown>();
     private canvas = document.createElement("canvas");
     private center = { lng: -0.115, lat: 51.512 };
+    private zoom = 0;
     private styleLoaded = true;
     dragRotate = { isEnabled: () => false, enable: vi.fn(), disable: vi.fn() };
     dragPan = { isEnabled: () => true, enable: vi.fn(), disable: vi.fn() };
@@ -34,6 +35,7 @@ vi.mock("maplibre-gl", () => {
         lng: options.center[0],
         lat: options.center[1],
       };
+      this.zoom = options.zoom;
       queueMicrotask(() => this.emit("load"));
     }
     on(name: string, handler: (...args: any[]) => void) {
@@ -57,6 +59,18 @@ vi.mock("maplibre-gl", () => {
     }
     setCenter(center: [number, number]) {
       this.center = { lng: center[0], lat: center[1] };
+    }
+    jumpTo = vi.fn(
+      (options: { center: [number, number]; zoom: number }) => {
+        this.center = {
+          lng: options.center[0],
+          lat: options.center[1],
+        };
+        this.zoom = options.zoom;
+      },
+    );
+    getZoom() {
+      return this.zoom;
     }
     getBounds() {
       const { lng, lat } = this.center;
@@ -113,19 +127,22 @@ vi.mock("maplibre-gl", () => {
 
   class MockGeolocateControl {
     private handlers = new Map<string, Array<(...args: any[]) => void>>();
+    _updateCamera?: (position: GeolocationPosition) => void;
     on(name: string, handler: (...args: any[]) => void) {
       this.handlers.set(name, [...(this.handlers.get(name) ?? []), handler]);
     }
     trigger() {
       queueMicrotask(() => {
+        const position = {
+          coords: {
+            longitude: -73.9857,
+            latitude: 40.7484,
+            accuracy: 10,
+          },
+        } as GeolocationPosition;
+        this._updateCamera?.(position);
         for (const handler of this.handlers.get("geolocate") ?? []) {
-          handler({
-            coords: {
-              longitude: -73.9857,
-              latitude: 40.7484,
-              accuracy: 10,
-            },
-          });
+          handler(position);
         }
       });
       return true;
@@ -410,7 +427,9 @@ describe("MapWorkspace", () => {
     ).toBeDisabled();
     expect(screen.getByText("Define an Area of Interest first."))
       .toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "RESET" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "RESET WORKSPACE" }),
+    ).toBeDisabled();
     expect(screen.getByLabelText("Filter")).toBeDisabled();
     expect(screen.getByLabelText("Heatmap")).toBeDisabled();
     expect(screen.getByText("No active filters")).toBeInTheDocument();
@@ -454,7 +473,9 @@ describe("MapWorkspace", () => {
       "nearby-parks/influence",
     );
 
-    const resetButton = screen.getByRole("button", { name: "RESET" });
+    const resetButton = screen.getByRole("button", {
+      name: "RESET WORKSPACE",
+    });
     expect(resetButton).toBeEnabled();
     expect(screen.queryByRole("button", { name: "Draw area" }))
       .not.toBeInTheDocument();
@@ -478,6 +499,87 @@ describe("MapWorkspace", () => {
     expect(screen.getByText("No active filters")).toBeInTheDocument();
     expect(screen.getByText("No active heatmaps")).toBeInTheDocument();
     expect(resetButton).toBeDisabled();
+  });
+
+  it("keeps the current area active until a redefined area is valid", async () => {
+    const fetchMock = vi.fn(async () =>
+      Response.json({ tiles: [], parks: [] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await screen.findByText("Centered near you");
+    (
+      MapLibreMap as unknown as {
+        lastInstance: { setCenter(center: [number, number]): void };
+      }
+    ).lastInstance.setCenter([-0.115, 51.512]);
+    await drawArea(user);
+    await user.selectOptions(
+      screen.getByLabelText("Filter"),
+      "nearby-parks/distance",
+    );
+    await screen.findByText("Active");
+    const requestCount = fetchMock.mock.calls.length;
+    const map = (
+      MapLibreMap as unknown as {
+        lastInstance: {
+          setCenter(center: [number, number]): void;
+        };
+      }
+    ).lastInstance;
+    map.setCenter([1, 52]);
+
+    await user.click(screen.getByRole("button", { name: "Redefine area" }));
+    const overlay = screen.getByTestId("draw-overlay");
+    Object.defineProperties(overlay, {
+      getBoundingClientRect: {
+        value: () => ({
+          left: 0,
+          top: 0,
+          right: 1000,
+          bottom: 700,
+          width: 1000,
+          height: 700,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        }),
+      },
+      setPointerCapture: { value: vi.fn() },
+      releasePointerCapture: { value: vi.fn() },
+    });
+    fireEvent.pointerDown(overlay, {
+      button: 0,
+      clientX: 500,
+      clientY: 200,
+      isPrimary: true,
+      pointerId: 2,
+    });
+    fireEvent.pointerMove(overlay, {
+      clientX: 700,
+      clientY: 450,
+      isPrimary: true,
+      pointerId: 2,
+    });
+
+    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1");
+    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(requestCount);
+
+    fireEvent.pointerUp(overlay, {
+      clientX: 700,
+      clientY: 450,
+      isPrimary: true,
+      pointerId: 2,
+    });
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(requestCount),
+    );
+    expect(
+      screen.getByRole("button", { name: "Redefine area" }),
+    ).toHaveAttribute("aria-pressed", "false");
   });
 
   it("creates the drawn boundary in Zillow before opening a new tab", async () => {
@@ -548,6 +650,12 @@ describe("MapWorkspace", () => {
     const user = userEvent.setup();
     render(<MapWorkspace />);
 
+    await screen.findByText("Centered near you");
+    (
+      MapLibreMap as unknown as {
+        lastInstance: { setCenter(center: [number, number]): void };
+      }
+    ).lastInstance.setCenter([-0.115, 51.512]);
     await drawArea(user);
     const filterSelector = await screen.findByLabelText("Filter");
     const map = (
@@ -721,6 +829,7 @@ describe("MapWorkspace", () => {
     const user = userEvent.setup();
     render(<MapWorkspace />);
 
+    await screen.findByText("Centered near you");
     (
       MapLibreMap as unknown as {
         lastInstance: { setCenter(center: [number, number]): void };
@@ -735,6 +844,25 @@ describe("MapWorkspace", () => {
       name: "Commute address",
     });
     await user.type(addressInput, "Peachtree");
+    const suggestionRequest = await waitFor(() => {
+      const request = fetchMock.mock.calls.find(([input]) =>
+        String(input).startsWith("/api/address-suggestions"),
+      );
+      expect(request).toBeDefined();
+      return String(request?.[0]);
+    });
+    const suggestionParameters = new URL(
+      suggestionRequest,
+      "http://localhost",
+    ).searchParams;
+    expect(Number(suggestionParameters.get("longitude"))).toBeCloseTo(
+      -84.34,
+      2,
+    );
+    expect(Number(suggestionParameters.get("latitude"))).toBeCloseTo(
+      33.7525,
+      2,
+    );
     await user.click(
       await screen.findByRole(
         "button",
@@ -818,7 +946,7 @@ describe("MapWorkspace", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("starts at and refreshes the saved location without animation", async () => {
+  it("uses the same wider zoom for saved and newly located positions", async () => {
     localStorage.setItem(
       "places-heatmap:last-location",
       JSON.stringify({ longitude: 2.3522, latitude: 48.8566 }),
@@ -830,19 +958,55 @@ describe("MapWorkspace", () => {
       MapLibreMap as unknown as {
         lastOptions: {
           center: [number, number];
+          zoom: number;
         };
       }
     ).lastOptions;
     expect(options.center).toEqual([2.3522, 48.8566]);
+    expect(options.zoom).toBe(11.3);
     expect(
       screen.getByText("Centered at your last known location"),
     ).toBeInTheDocument();
 
     await screen.findByText("Centered near you");
+    const map = (
+      MapLibreMap as unknown as {
+        lastInstance: {
+          jumpTo: ReturnType<typeof vi.fn>;
+          getZoom(): number;
+        };
+      }
+    ).lastInstance;
+    expect(map.jumpTo).toHaveBeenCalledWith({
+      center: [-73.9857, 40.7484],
+      zoom: 11.3,
+    });
+    expect(map.getZoom()).toBe(11.3);
     expect(
       JSON.parse(
         localStorage.getItem("places-heatmap:last-location") ?? "null",
       ),
     ).toEqual({ longitude: -73.9857, latitude: 40.7484 });
+  });
+
+  it("does not recenter when geolocation matches the saved location", async () => {
+    localStorage.setItem(
+      "places-heatmap:last-location",
+      JSON.stringify({ longitude: -73.9857, latitude: 40.7484 }),
+    );
+
+    render(<MapWorkspace />);
+    await screen.findByText("Centered near you");
+
+    const map = (
+      MapLibreMap as unknown as {
+        lastInstance: {
+          jumpTo: ReturnType<typeof vi.fn>;
+          getZoom(): number;
+        };
+      }
+    ).lastInstance;
+    expect(map.jumpTo).not.toHaveBeenCalled();
+    expect(map.getZoom()).toBe(11.3);
   });
 });
