@@ -89,7 +89,7 @@ export default defineExtension({
     {
       kind: "surface",
       id: "preview",
-      name: "Preview",
+      name: "Zillow Preview Region",
       initialState: {},
       load: async (_state, context) =>
         zillowPreviewSurface(context.regions),

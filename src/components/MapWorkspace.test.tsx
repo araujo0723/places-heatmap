@@ -220,7 +220,7 @@ const contributionLabels: Record<string, string> = {
   "nearby-parks/influence": "Parks",
   "nearby-water/influence": "Lakes",
   "commute/travel-time": "Commute",
-  "zillow/preview": "Preview",
+  "zillow/preview": "Zillow Preview Region",
   "test/reject-all": "Reject all",
   "test/points": "Test points",
 };
@@ -411,7 +411,7 @@ describe("MapWorkspace", () => {
     expect(screen.queryByText(/demo-places/i)).not.toBeInTheDocument();
   });
 
-  it("renders the Zillow Preview as a simplified dark blue surface", async () => {
+  it("renders the Zillow Preview Region as a simplified dark blue surface", async () => {
     const user = userEvent.setup();
     render(<MapWorkspace />);
 
