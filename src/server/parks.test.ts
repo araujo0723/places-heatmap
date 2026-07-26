@@ -170,6 +170,33 @@ describe("park data service", () => {
     );
   });
 
+  it("keeps valid ORS subdivisions when one response is not JSON", async () => {
+    let orsRequests = 0;
+    const fetchMock = vi.fn(
+      async (url: string | URL | Request, _init?: RequestInit) => {
+        if (String(url).includes("overpass.test")) {
+          return new Response("busy", { status: 503 });
+        }
+        orsRequests += 1;
+        return orsRequests === 1
+          ? new Response("Not JSON", { status: 200 })
+          : Response.json({ features: [] });
+      },
+    );
+
+    await expect(
+      getParksForTiles([tile], {
+        fetch: fetchMock as typeof fetch,
+        overpassUrl: "https://overpass.test/interpreter",
+        orsApiKey: "test-key",
+      }),
+    ).resolves.toEqual([]);
+    expect(orsRequests).toBe(9);
+    for (const [, init] of fetchMock.mock.calls.slice(1)) {
+      expect(String(init?.body)).not.toContain("NaN");
+    }
+  });
+
   it("surfaces upstream failures", async () => {
     await expect(
       getParksForTiles([tile], {

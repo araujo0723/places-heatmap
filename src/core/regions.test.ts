@@ -131,6 +131,27 @@ describe("region collection simplification", () => {
     expect(areaOfInterestIsWithinLimit(overLimit)).toBe(false);
   });
 
+  it("rejects non-finite Area of Interest coordinates", () => {
+    expect(() =>
+      regionViewport({
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "Polygon",
+          coordinates: [
+            [
+              [Number.NaN, 0],
+              [1, 0],
+              [1, 1],
+              [0, 1],
+              [Number.NaN, 0],
+            ],
+          ],
+        },
+      }),
+    ).toThrow("invalid coordinates");
+  });
+
   it("clips filter-owned regions to the Area of Interest", () => {
     const clipped = clipRegions(
       [rectangle(-1, -1, 1, 1)],

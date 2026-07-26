@@ -1,9 +1,9 @@
 import {
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import * as maplibregl from "maplibre-gl";
@@ -15,13 +15,6 @@ import type {
   StyleSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import {
-  TerraDraw,
-  TerraDrawRectangleMode,
-  TerraDrawSelectMode,
-  type GeoJSONStoreFeatures,
-} from "terra-draw";
-import { TerraDrawMapLibreGLAdapter } from "terra-draw-maplibre-gl-adapter";
 import type { Feature, FeatureCollection, Point, Polygon } from "geojson";
 import {
   composePoints,
@@ -29,13 +22,14 @@ import {
   normalizeSurfaceHeatmap,
 } from "../core/composition";
 import {
-  areaOfInterestIsWithinLimit,
   clipSurfaceCollection,
   intersectRegionGroups,
-  MAX_AREA_OF_INTEREST_DIMENSION_MILES,
-  regionBoundingBoxDimensionsMiles,
   regionViewport,
 } from "../core/regions";
+import {
+  searchAddresses,
+  type AddressSelection,
+} from "../extensions/commute/data";
 import type {
   HostedPoint,
   MapViewport,
@@ -84,17 +78,14 @@ interface HeatmapRuntime {
   error?: string;
 }
 
-interface DrawPoint {
-  x: number;
-  y: number;
-  coordinate: [number, number];
-}
-
 const DEFAULT_TILE_URL =
   "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const DEFAULT_ATTRIBUTION = "© OpenStreetMap contributors";
 const LAST_LOCATION_KEY = "places-heatmap:last-location";
-const AUTO_CENTER_ZOOM = 11.3;
+const INITIAL_ZOOM = 10;
+const AREA_OF_INTEREST_RADIUS_MILES = 20;
+const EARTH_RADIUS_MILES = 3_958.7613;
+const MAP_PADDING = { top: 0, right: 0, bottom: 0, left: 400 } as const;
 const SAME_LOCATION_THRESHOLD_METERS = 25;
 const SNACK_DURATION_MS = 5_000;
 const EMPTY_COLLECTION: FeatureCollection<Point> = {
@@ -111,6 +102,7 @@ const EMPTY_SURFACE_COLLECTION: FeatureCollection<
 const NEUTRAL_PREDICATE: PointPredicate = () => true;
 const AREA_OF_INTEREST_MASK_SOURCE_ID = "area-of-interest-mask-source";
 const AREA_OF_INTEREST_MASK_LAYER_ID = "area-of-interest-outside-mask";
+const AREA_OF_INTEREST_OUTLINE_LAYER_ID = "area-of-interest-outline";
 const WEB_MERCATOR_WORLD_RING: Array<[number, number]> = [
   [-180, -85.051129],
   [180, -85.051129],
@@ -126,6 +118,42 @@ const REGION_STYLE_PROPERTIES = {
   lineOpacity: "__hostLineOpacity",
 } as const;
 
+function areaAroundOrigin(
+  [longitude, latitude]: [number, number],
+): Feature<Polygon> {
+  const angularDistance = AREA_OF_INTEREST_RADIUS_MILES / EARTH_RADIUS_MILES;
+  const latitudeDelta = (angularDistance * 180) / Math.PI;
+  const longitudeScale = Math.max(
+    Math.cos((latitude * Math.PI) / 180),
+    0.000001,
+  );
+  const longitudeDelta = Math.min(180, latitudeDelta / longitudeScale);
+  const west = Math.max(-180, longitude - longitudeDelta);
+  const east = Math.min(180, longitude + longitudeDelta);
+  const south = Math.max(-85.051129, latitude - latitudeDelta);
+  const north = Math.min(85.051129, latitude + latitudeDelta);
+
+  return {
+    type: "Feature",
+    properties: {
+      origin: [longitude, latitude],
+      radiusMiles: AREA_OF_INTEREST_RADIUS_MILES,
+    },
+    geometry: {
+      type: "Polygon",
+      coordinates: [
+        [
+          [west, north],
+          [west, south],
+          [east, south],
+          [east, north],
+          [west, north],
+        ],
+      ],
+    },
+  };
+}
+
 function readLastLocation(): [number, number] | undefined {
   try {
     const value = JSON.parse(localStorage.getItem(LAST_LOCATION_KEY) ?? "null");
@@ -137,8 +165,8 @@ function readLastLocation(): [number, number] | undefined {
       value.longitude <= 180 &&
       typeof value.latitude === "number" &&
       Number.isFinite(value.latitude) &&
-      value.latitude >= -90 &&
-      value.latitude <= 90
+      value.latitude >= -85.051129 &&
+      value.latitude <= 85.051129
     ) {
       return [value.longitude, value.latitude];
     }
@@ -455,6 +483,173 @@ function EmptyState({ children }: { children: ReactNode }) {
   );
 }
 
+function OriginDialog({
+  proximity,
+  onClose,
+  onSelect,
+}: {
+  proximity: [number, number];
+  onClose: () => void;
+  onSelect: (address: AddressSelection) => void;
+}) {
+  const listId = useId();
+  const requestSequence = useRef(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState<AddressSelection[]>([]);
+  const [message, setMessage] = useState<string>();
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [onClose]);
+
+  useEffect(() => {
+    const normalized = query.trim();
+    if (normalized.length < 3) {
+      setSuggestions([]);
+      setMessage(
+        normalized.length > 0
+          ? "Type at least 3 characters to search."
+          : undefined,
+      );
+      setSearching(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      const sequence = ++requestSequence.current;
+      setSearching(true);
+      setMessage(undefined);
+      try {
+        const results = await searchAddresses(
+          normalized,
+          controller.signal,
+          proximity,
+        );
+        if (sequence !== requestSequence.current) return;
+        setSuggestions(results);
+        setMessage(
+          results.length
+            ? undefined
+            : "No matching addresses found. Try a fuller address.",
+        );
+      } catch (error) {
+        if (controller.signal.aborted || sequence !== requestSequence.current)
+          return;
+        setSuggestions([]);
+        setMessage(
+          error instanceof Error ? error.message : "Address lookup failed.",
+        );
+      } finally {
+        if (sequence === requestSequence.current) setSearching(false);
+      }
+    }, 320);
+
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [proximity, query]);
+
+  return (
+    <div
+      className="absolute inset-0 z-30 grid place-items-center bg-slate-950/45 p-6 backdrop-blur-sm"
+      role="presentation"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        aria-describedby="set-origin-description"
+        aria-labelledby="set-origin-title"
+        aria-modal="true"
+        className="w-full max-w-lg rounded-2xl border border-white/80 bg-white p-5 shadow-2xl"
+        role="dialog"
+      >
+        <h2 id="set-origin-title" className="text-base font-bold text-slate-900">
+          Set origin
+        </h2>
+        <p
+          id="set-origin-description"
+          className="mt-2 text-sm leading-5 text-slate-600"
+        >
+          Search for an address. Selecting it creates a new Area of Interest
+          extending 20 miles in every direction.
+        </p>
+        <div className="relative mt-4">
+          <input
+            ref={inputRef}
+            aria-autocomplete="list"
+            aria-controls={listId}
+            aria-expanded={suggestions.length > 0}
+            aria-label="Origin address"
+            autoComplete="off"
+            className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 pr-9 text-sm text-slate-800 shadow-sm focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 focus:outline-none"
+            placeholder="Start typing an address"
+            type="text"
+            value={query}
+            onChange={(event) => {
+              setQuery(event.currentTarget.value);
+              setSuggestions([]);
+              setMessage(undefined);
+            }}
+          />
+          {searching ? (
+            <span
+              aria-hidden="true"
+              className="absolute top-1/2 right-3 h-4 w-4 -translate-y-1/2 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-500"
+            />
+          ) : null}
+        </div>
+        {suggestions.length ? (
+          <ul
+            className="mt-2 max-h-60 overflow-y-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg"
+            id={listId}
+            role="listbox"
+          >
+            {suggestions.map((suggestion) => (
+              <li
+                key={`${suggestion.address}-${suggestion.center.join(",")}`}
+                role="option"
+                aria-selected={false}
+              >
+                <button
+                  className="w-full px-3 py-2.5 text-left text-xs leading-5 text-slate-700 hover:bg-indigo-50 focus:bg-indigo-50 focus:outline-none"
+                  type="button"
+                  onClick={() => onSelect(suggestion)}
+                >
+                  {suggestion.address}
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+        {message ? (
+          <p className="mt-2 text-xs leading-5 text-slate-500" aria-live="polite">
+            {message}
+          </p>
+        ) : null}
+        <div className="mt-5 flex justify-end">
+          <button
+            className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 focus:ring-2 focus:ring-slate-300 focus:outline-none"
+            type="button"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ToolbarDropdown({
   label,
   icon,
@@ -579,25 +774,23 @@ function ToolbarButton({
 export default function MapWorkspace() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
-  const drawRef = useRef<TerraDraw | null>(null);
-  const activeDrawPointerRef = useRef<number | undefined>(undefined);
-  const drawDraftRef = useRef<DrawPoint[]>([]);
-  const lastValidAreaRef = useRef<Feature<Polygon> | undefined>(undefined);
-  const restoringAreaRef = useRef(false);
-  const resettingDrawRef = useRef(false);
   const renderedLayerKeysRef = useRef(new Set<string>());
   const contributionInstanceRef = useRef(0);
   const lastLocationRef = useRef(readLastLocation());
 
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState<string>();
-  const [drawError, setDrawError] = useState<string>();
-  const [drawDraft, setDrawDraft] = useState<DrawPoint[]>([]);
   const [locationStatus, setLocationStatus] = useState<
     "cached" | "locating" | "located" | "unavailable"
   >(lastLocationRef.current ? "cached" : "locating");
-  const [drawMode, setDrawMode] = useState<"select" | "rectangle">("select");
-  const [areaOfInterest, setAreaOfInterest] = useState<Feature<Polygon>>();
+  const [areaOfInterest, setAreaOfInterest] = useState<
+    Feature<Polygon> | undefined
+  >(() =>
+    lastLocationRef.current
+      ? areaAroundOrigin(lastLocationRef.current)
+      : undefined,
+  );
+  const [originDialogOpen, setOriginDialogOpen] = useState(false);
   const [resetConfirmationOpen, setResetConfirmationOpen] = useState(false);
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([]);
   const [enabledFilterIds, setEnabledFilterIds] = useState<Set<string>>(
@@ -642,6 +835,24 @@ export default function MapWorkspace() {
     };
   };
 
+  function applyOrigin(center: [number, number]) {
+    if (
+      !Number.isFinite(center[0]) ||
+      center[0] < -180 ||
+      center[0] > 180 ||
+      !Number.isFinite(center[1]) ||
+      center[1] < -85.051129 ||
+      center[1] > 85.051129
+    ) {
+      return;
+    }
+    setAreaOfInterest(areaAroundOrigin(center));
+    mapRef.current?.jumpTo({
+      center,
+      zoom: INITIAL_ZOOM,
+    });
+  }
+
   useEffect(() => {
     if (!mapContainerRef.current || mapRef.current) return;
 
@@ -655,10 +866,11 @@ export default function MapWorkspace() {
         container: mapContainerRef.current,
         style: baseStyle(tileUrl, attribution),
         center: lastLocation ?? [-0.115, 51.512],
-        zoom: AUTO_CENTER_ZOOM,
+        zoom: INITIAL_ZOOM,
         attributionControl: false,
       });
       mapRef.current = map;
+      map.setPadding(MAP_PADDING);
       map.addControl(
         new maplibregl.NavigationControl({ showCompass: false }),
         "top-right",
@@ -674,9 +886,9 @@ export default function MapWorkspace() {
           maximumAge: 60_000,
         },
         fitBoundsOptions: {
-          maxZoom: AUTO_CENTER_ZOOM,
+          maxZoom: INITIAL_ZOOM,
           duration: 0,
-          padding: { top: 80, right: 80, bottom: 80, left: 420 },
+          padding: MAP_PADDING,
         },
         trackUserLocation: false,
         showUserLocation: true,
@@ -699,14 +911,20 @@ export default function MapWorkspace() {
         }
         map.jumpTo({
           center: nextLocation,
-          zoom: AUTO_CENTER_ZOOM,
+          zoom: INITIAL_ZOOM,
         });
       };
       geolocate.on("geolocate", (event) => {
         const position = event as unknown as Partial<GeolocationPosition>;
         if (
           typeof position.coords?.longitude === "number" &&
-          typeof position.coords.latitude === "number"
+          Number.isFinite(position.coords.longitude) &&
+          position.coords.longitude >= -180 &&
+          position.coords.longitude <= 180 &&
+          typeof position.coords.latitude === "number" &&
+          Number.isFinite(position.coords.latitude) &&
+          position.coords.latitude >= -85.051129 &&
+          position.coords.latitude <= 85.051129
         ) {
           const nextLocation: [number, number] = [
             position.coords.longitude,
@@ -714,118 +932,16 @@ export default function MapWorkspace() {
           ];
           lastLocationRef.current = nextLocation;
           saveLastLocation(...nextLocation);
+          setAreaOfInterest(areaAroundOrigin(nextLocation));
+          setLocationStatus("located");
+        } else {
+          setLocationStatus("unavailable");
         }
-        setLocationStatus("located");
       });
       geolocate.on("error", () => setLocationStatus("unavailable"));
       map.addControl(geolocate, "top-right");
 
       const onLoad = () => {
-        const draw = new TerraDraw({
-          adapter: new TerraDrawMapLibreGLAdapter({
-            map,
-            prefixId: "regions",
-          }),
-          modes: [
-            new TerraDrawRectangleMode({
-              drawInteraction: "click-drag",
-              styles: {
-                fillColor: "#64748b",
-                fillOpacity: 0,
-                outlineColor: "#64748b",
-                outlineOpacity: 0.9,
-                outlineWidth: 1,
-              },
-            }),
-            new TerraDrawSelectMode({
-              styles: {
-                selectedPolygonColor: "#64748b",
-                selectedPolygonFillOpacity: 0,
-                selectedPolygonOutlineColor: "#64748b",
-                selectedPolygonOutlineOpacity: 0.9,
-                selectedPolygonOutlineWidth: 1,
-              },
-              flags: {
-                rectangle: {
-                  feature: {
-                    draggable: true,
-                    coordinates: {
-                      resizable: "opposite-fixed",
-                    },
-                  },
-                },
-              },
-            }),
-          ],
-        });
-
-        const syncAreaOfInterest = () => {
-          if (restoringAreaRef.current || resettingDrawRef.current) return;
-          const polygons = draw
-            .getSnapshot()
-            .filter(
-              (
-                feature,
-              ): feature is GeoJSONStoreFeatures<Polygon> =>
-                feature.geometry.type === "Polygon",
-            )
-            .map((feature) => feature as Feature<Polygon>);
-
-          const polygon = polygons[0];
-          if (!polygon) {
-            const previous = lastValidAreaRef.current;
-            if (previous) {
-              restoringAreaRef.current = true;
-              draw.addFeatures([
-                previous as GeoJSONStoreFeatures<Polygon>,
-              ]);
-              restoringAreaRef.current = false;
-              setDrawError(
-                "Draw a replacement to change the current Area of Interest.",
-              );
-            }
-            return;
-          }
-
-          if (!areaOfInterestIsWithinLimit(polygon)) {
-            const previous = lastValidAreaRef.current;
-            if (previous && polygon.id !== undefined) {
-              restoringAreaRef.current = true;
-              draw.updateFeatureGeometry(polygon.id, previous.geometry);
-              restoringAreaRef.current = false;
-            }
-            setDrawError(
-              `The Area of Interest cannot be more than ${MAX_AREA_OF_INTEREST_DIMENSION_MILES} miles across.`,
-            );
-            return;
-          }
-
-          lastValidAreaRef.current = polygon;
-          setAreaOfInterest(polygon);
-          setDrawError(undefined);
-        };
-        const finishDrawing = () => {
-          syncAreaOfInterest();
-          draw.setMode("select");
-          setDrawMode("select");
-        };
-
-        draw.on("change", syncAreaOfInterest);
-        draw.on("finish", finishDrawing);
-        draw.start();
-        map.setPaintProperty(
-          "regions-polygon-outline",
-          "line-dasharray",
-          [1, 2],
-        );
-        map.setLayoutProperty(
-          "regions-polygon-outline",
-          "line-cap",
-          "round",
-        );
-        draw.setMode("select");
-
-        drawRef.current = draw;
         setMapReady(true);
         if (!lastLocation) setLocationStatus("locating");
         geolocate.trigger();
@@ -839,8 +955,6 @@ export default function MapWorkspace() {
       map.on("error", onError);
 
       return () => {
-        drawRef.current?.stop();
-        drawRef.current = null;
         map.remove();
         mapRef.current = null;
       };
@@ -882,6 +996,19 @@ export default function MapWorkspace() {
         },
         beforeId,
       );
+    }
+    if (!map.getLayer(AREA_OF_INTEREST_OUTLINE_LAYER_ID)) {
+      map.addLayer({
+        id: AREA_OF_INTEREST_OUTLINE_LAYER_ID,
+        source: AREA_OF_INTEREST_MASK_SOURCE_ID,
+        type: "line",
+        paint: {
+          "line-color": "#64748b",
+          "line-opacity": 0.9,
+          "line-width": 1.5,
+          "line-dasharray": [1, 2],
+        },
+      });
     }
   }, [areaOfInterest, mapReady]);
 
@@ -1409,176 +1536,14 @@ export default function MapWorkspace() {
     setEnabledHeatmapIds((current) => new Set(current).add(instanceId));
   };
 
-  const startDrawing = () => {
-    const map = mapRef.current;
-    map?.stop();
-    drawRef.current?.setMode("select");
-    activeDrawPointerRef.current = undefined;
-    drawDraftRef.current = [];
-    setDrawDraft([]);
-    setDrawError(undefined);
-    setDrawMode("rectangle");
-  };
-  const drawPointFromEvent = (
-    event: ReactPointerEvent<HTMLDivElement>,
-  ): DrawPoint | undefined => {
-    const map = mapRef.current;
-    if (!map) return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - bounds.left;
-    const y = event.clientY - bounds.top;
-    const location = map.unproject([x, y]);
-    return {
-      x,
-      y,
-      coordinate: [
-        Number(location.lng.toFixed(6)),
-        Number(location.lat.toFixed(6)),
-      ],
-    };
-  };
-  const updateDrawDraft = (points: DrawPoint[]) => {
-    drawDraftRef.current = points;
-    setDrawDraft(points);
-  };
-  const onDrawPointerDown = (
-    event: ReactPointerEvent<HTMLDivElement>,
-  ) => {
-    if (
-      drawMode !== "rectangle" ||
-      !event.isPrimary ||
-      event.button !== 0
-    ) {
-      return;
-    }
-    const point = drawPointFromEvent(event);
-    if (!point) return;
-    event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    activeDrawPointerRef.current = event.pointerId;
-    setDrawError(undefined);
-    updateDrawDraft([point]);
-  };
-  const onDrawPointerMove = (
-    event: ReactPointerEvent<HTMLDivElement>,
-  ) => {
-    if (activeDrawPointerRef.current !== event.pointerId) return;
-    const point = drawPointFromEvent(event);
-    const start = drawDraftRef.current[0];
-    if (!point || !start) return;
-    event.preventDefault();
-    updateDrawDraft([start, point]);
-  };
-  const onDrawPointerUp = (
-    event: ReactPointerEvent<HTMLDivElement>,
-  ) => {
-    if (activeDrawPointerRef.current !== event.pointerId) return;
-    event.preventDefault();
-    event.currentTarget.releasePointerCapture(event.pointerId);
-    activeDrawPointerRef.current = undefined;
-
-    const start = drawDraftRef.current[0];
-    const end = drawPointFromEvent(event) ?? drawDraftRef.current[1];
-    if (
-      !start ||
-      !end ||
-      Math.abs(end.x - start.x) < 4 ||
-      Math.abs(end.y - start.y) < 4
-    ) {
-      updateDrawDraft([]);
-      setDrawError(
-        "Drag to draw a larger rectangle before releasing the pointer.",
-      );
-      return;
-    }
-
-    const west = Math.min(start.coordinate[0], end.coordinate[0]);
-    const south = Math.min(start.coordinate[1], end.coordinate[1]);
-    const east = Math.max(start.coordinate[0], end.coordinate[0]);
-    const north = Math.max(start.coordinate[1], end.coordinate[1]);
-    const closedCoordinates: Array<[number, number]> = [
-      [west, north],
-      [west, south],
-      [east, south],
-      [east, north],
-      [west, north],
-    ];
-    const draw = drawRef.current;
-    if (!draw) return;
-    const feature: GeoJSONStoreFeatures<Polygon> = {
-      type: "Feature",
-      id: draw.getFeatureId(),
-      properties: { mode: "rectangle" },
-      geometry: {
-        type: "Polygon",
-        coordinates: [closedCoordinates],
-      },
-    };
-    if (!areaOfInterestIsWithinLimit(feature)) {
-      const { largest } = regionBoundingBoxDimensionsMiles(feature);
-      updateDrawDraft([]);
-      setDrawError(
-        `The Area of Interest is ${largest.toFixed(1)} miles across. It cannot be more than ${MAX_AREA_OF_INTEREST_DIMENSION_MILES} miles.`,
-      );
-      return;
-    }
-    const previousFeatureIds = draw
-      .getSnapshot()
-      .map(({ id }) => id)
-      .filter((id): id is string | number => id !== undefined);
-    const [validation] = (() => {
-      resettingDrawRef.current = true;
-      try {
-        const result = draw.addFeatures([feature]);
-        if (result[0]?.valid && previousFeatureIds.length > 0) {
-          draw.removeFeatures(previousFeatureIds);
-        }
-        return result;
-      } finally {
-        resettingDrawRef.current = false;
-      }
-    })();
-
-    if (!validation?.valid) {
-      updateDrawDraft([]);
-      setDrawError(validation?.reason ?? "The drawn region was invalid.");
-      return;
-    }
-
-    updateDrawDraft([]);
-    lastValidAreaRef.current = feature;
-    setAreaOfInterest(feature);
-    draw.setMode("select");
-    setDrawMode("select");
-  };
-  const onDrawPointerCancel = (
-    event: ReactPointerEvent<HTMLDivElement>,
-  ) => {
-    if (activeDrawPointerRef.current !== event.pointerId) return;
-    activeDrawPointerRef.current = undefined;
-    updateDrawDraft([]);
-    setDrawError("Drawing was interrupted. Try drawing the rectangle again.");
-  };
-  const drawStart = drawDraft[0];
-  const drawEnd = drawDraft[1];
   const locationMessage =
     locationStatus === "located"
       ? "Centered near you"
       : locationStatus === "cached"
         ? "Centered at your last known location"
         : locationStatus === "unavailable"
-          ? "Location unavailable — use the target button to retry"
+          ? "Location unavailable — use Set origin"
           : "Finding your location…";
-  const drawPreviewPath =
-    drawStart && drawEnd
-      ? [
-          `M ${Math.min(drawStart.x, drawEnd.x)} ${Math.min(drawStart.y, drawEnd.y)}`,
-          `L ${Math.max(drawStart.x, drawEnd.x)} ${Math.min(drawStart.y, drawEnd.y)}`,
-          `L ${Math.max(drawStart.x, drawEnd.x)} ${Math.max(drawStart.y, drawEnd.y)}`,
-          `L ${Math.min(drawStart.x, drawEnd.x)} ${Math.max(drawStart.y, drawEnd.y)}`,
-          "Z",
-        ].join(" ")
-      : undefined;
   const resetAll = () => {
     setActiveFilters([]);
     setEnabledFilterIds(new Set());
@@ -1597,47 +1562,14 @@ export default function MapWorkspace() {
         className="!absolute !inset-0"
         aria-label="Interactive places map"
       />
-      {drawMode === "rectangle" ? (
-        <div
-          data-testid="draw-overlay"
-          className="absolute inset-0 z-[5] cursor-crosshair touch-none"
-          onPointerDown={onDrawPointerDown}
-          onPointerMove={onDrawPointerMove}
-          onPointerUp={onDrawPointerUp}
-          onPointerCancel={onDrawPointerCancel}
-        >
-          <svg
-            className="pointer-events-none h-full w-full"
-            aria-hidden="true"
-          >
-            {drawPreviewPath ? (
-              <path
-                data-testid="draw-preview"
-                d={drawPreviewPath}
-                fill="none"
-                stroke="#64748b"
-                strokeDasharray="2 4"
-                strokeWidth="1.5"
-                strokeLinejoin="round"
-                strokeLinecap="round"
-              />
-            ) : null}
-          </svg>
-        </div>
-      ) : null}
 
       <aside className="absolute top-4 bottom-4 left-4 z-10 flex w-96 flex-col overflow-hidden rounded-2xl border border-white/70 bg-white/95 shadow-2xl shadow-slate-900/20 backdrop-blur">
         <header className="flex shrink-0 items-center gap-2 border-b border-slate-950 bg-slate-900 px-5 py-4">
           <ToolbarButton
-            label={
-              areaOfInterest
-                ? "Redefine Area of Interest"
-                : "Define Area of Interest"
-            }
-            icon="/icons/area-of-interest.svg"
-            active={drawMode === "rectangle"}
+            label="Set origin"
+            icon="/icons/origin.svg"
             disabled={!mapReady}
-            onClick={startDrawing}
+            onClick={() => setOriginDialogOpen(true)}
           />
           <ToolbarDropdown
             label="Add Filter"
@@ -1661,7 +1593,7 @@ export default function MapWorkspace() {
           />
           <button
             aria-label="RESET ALL"
-            className="ml-auto grid size-11 place-items-center rounded-lg border border-slate-200 bg-white text-red-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 focus:ring-2 focus:ring-rose-300 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-slate-50"
+            className="group relative ml-auto grid size-11 place-items-center rounded-lg border border-slate-200 bg-white text-red-600 shadow-sm transition hover:border-rose-300 hover:bg-rose-50 focus:ring-2 focus:ring-rose-300 focus:outline-none disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-600 disabled:opacity-40 disabled:hover:border-slate-200 disabled:hover:bg-slate-50"
             disabled={activeFilters.length === 0 && activeHeatmaps.length === 0}
             title="Reset all filters and heatmaps"
             type="button"
@@ -1679,6 +1611,9 @@ export default function MapWorkspace() {
             >
               <path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5" />
             </svg>
+            <span className="pointer-events-none absolute top-full left-1/2 z-30 mt-2 -translate-x-1/2 rounded-md bg-slate-950 px-2 py-1 text-[10px] font-semibold whitespace-nowrap text-white opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+              Reset all filters and heatmaps
+            </span>
           </button>
           <span className="sr-only" data-testid="area-of-interest-count">
             {areaOfInterest ? 1 : 0}
@@ -1946,6 +1881,17 @@ export default function MapWorkspace() {
         </div>
       </aside>
 
+      {originDialogOpen ? (
+        <OriginDialog
+          proximity={actionViewport.center}
+          onClose={() => setOriginDialogOpen(false)}
+          onSelect={(address) => {
+            applyOrigin(address.center);
+            setOriginDialogOpen(false);
+          }}
+        />
+      ) : null}
+
       {resetConfirmationOpen ? (
         <div
           className="absolute inset-0 z-30 grid place-items-center bg-slate-950/45 p-6 backdrop-blur-sm"
@@ -2014,14 +1960,6 @@ export default function MapWorkspace() {
         {mapError && mapReady ? (
           <TransientSnack resetKey={mapError}>
             Base map warning: {mapError}
-          </TransientSnack>
-        ) : null}
-        {drawError ? (
-          <TransientSnack
-            resetKey={drawError}
-            role="alert"
-          >
-            {drawError}
           </TransientSnack>
         ) : null}
         {enabledFilters.length || enabledHeatmaps.length ? (

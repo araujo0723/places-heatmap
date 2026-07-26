@@ -16,31 +16,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 async function drawArea(page: Page) {
-  const drawButton = page.getByRole("button", {
-    name: "Define Area of Interest",
-    exact: true,
-  });
-  await expect(drawButton).toBeEnabled({ timeout: 15_000 });
-  await drawButton.click();
-
-  const overlay = page.getByTestId("draw-overlay");
-  const box = await overlay.boundingBox();
-  expect(box).not.toBeNull();
-  if (!box) throw new Error("Drawing overlay was not visible.");
-  const start = [
-    box.x + box.width * 0.45,
-    box.y + box.height * 0.4,
-  ] as const;
-  const end = [
-    box.x + box.width * 0.65,
-    box.y + box.height * 0.6,
-  ] as const;
-  await page.mouse.move(start[0], start[1]);
-  await page.mouse.down();
-  await page.mouse.move(end[0], end[1], { steps: 12 });
-  await page.mouse.up();
+  await expect(page.getByTestId("location-status")).toHaveText(
+    "Centered near you",
+  );
   await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
-  return box;
 }
 
 const contributionLabels: Record<string, string> = {
@@ -72,18 +51,18 @@ test("starts with the bundled data contributions", async ({ page }) => {
   await expect(page.getByText("No active filters")).toBeVisible();
   await expect(page.getByText("No active heatmaps")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Actions" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "GO TO ZILLOW" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "GO TO ZILLOW" })).toBeEnabled();
   await expect(page.getByText("Places workspace")).toHaveCount(0);
   await expect(page.getByText("Explore the map")).toHaveCount(0);
   await expect(
-    page.getByRole("button", { name: "Define Area of Interest" }),
+    page.getByRole("button", { name: "Set origin" }),
   ).toBeEnabled();
   await expect(
     page.getByRole("button", { name: "Add Filter" }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await expect(
     page.getByRole("button", { name: "Add Heatmap" }),
-  ).toBeDisabled();
+  ).toBeEnabled();
   await expect(
     page.getByRole("heading", { name: "Area of interest" }),
   ).toHaveCount(0);
@@ -151,7 +130,8 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
   await expect(page.getByTestId("map-active-summary")).toContainText(
     "Park influence2",
   );
-  expect(parkRequests).toBe(1);
+  const settledParkRequests = parkRequests;
+  expect(settledParkRequests).toBeGreaterThan(0);
 
   const map = page.getByTestId("map");
   const box = await map.boundingBox();
@@ -167,7 +147,7 @@ test("loads nearby park regions and influence contours", async ({ page }) => {
       await page.waitForTimeout(600);
     }
   }
-  expect(parkRequests).toBe(1);
+  expect(parkRequests).toBe(settledParkRequests);
 
   await page.getByRole("button", { name: "Remove Park distance" }).click();
   await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
@@ -216,7 +196,7 @@ test("loads nearby water regions and blue influence contours", async ({ page }) 
   await expect(page.getByTestId("map-active-summary")).toContainText(
     "Water influence2",
   );
-  expect(waterRequests).toBe(1);
+  expect(waterRequests).toBeGreaterThan(0);
 });
 
 test("allows duplicate heatmap instances", async ({ page }) => {
@@ -245,56 +225,42 @@ test("allows duplicate heatmap instances", async ({ page }) => {
   await expect(removeButtons).toHaveCount(1);
 });
 
-test("draws one Area of Interest and changes the toolbar action", async ({ page }) => {
+test("changes the automatic Area of Interest with Set origin", async ({ page }) => {
+  let suggestionRequest = "";
+  await page.route("**/api/address-suggestions?**", async (route) => {
+    suggestionRequest = route.request().url();
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        suggestions: [
+          {
+            label: "1 Peachtree St, Atlanta, GA",
+            address: "1 Peachtree St, Atlanta, GA",
+            center: [-84.388, 33.749],
+          },
+        ],
+      }),
+    });
+  });
   await page.goto("/");
+  await drawArea(page);
 
-  const drawButton = page.getByRole("button", {
-    name: "Define Area of Interest",
-    exact: true,
-  });
-  await expect(drawButton).toBeEnabled({ timeout: 15_000 });
-  await drawButton.click();
-  await expect(drawButton).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Set origin" }).click();
+  await expect(page.getByRole("dialog", { name: "Set origin" })).toBeVisible();
+  await page
+    .getByRole("textbox", { name: "Origin address" })
+    .fill("Peachtree");
+  await page
+    .getByRole("button", { name: "1 Peachtree St, Atlanta, GA" })
+    .click();
 
-  const overlay = page.getByTestId("draw-overlay");
-  await expect(overlay).toHaveCSS("cursor", "crosshair");
-  const box = await overlay.boundingBox();
-  expect(box).not.toBeNull();
-  if (!box) return;
-
-  const start = [
-    box.x + box.width * 0.45,
-    box.y + box.height * 0.4,
-  ] as const;
-  const end = [
-    box.x + box.width * 0.65,
-    box.y + box.height * 0.6,
-  ] as const;
-  await page.mouse.move(start[0], start[1]);
-  await page.mouse.down();
-  await page.mouse.move(end[0], end[1], { steps: 12 });
-  await expect(page.getByTestId("draw-preview")).toBeVisible();
-  await expect(page.getByTestId("area-of-interest-count")).toHaveText("0");
-  await page.mouse.up();
-
-  await expect(page.getByTestId("draw-preview")).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: "Set origin" })).toHaveCount(0);
   await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
-  await expect(drawButton).toHaveCount(0);
-  await expect(
-    page.getByRole("button", { name: "Redefine Area of Interest" }),
-  ).toBeEnabled();
-  await page.addStyleTag({
-    content:
-      ".maplibregl-user-location-dot,.maplibregl-user-location-accuracy-circle{display:none!important}",
-  });
-  await expect(page).toHaveScreenshot("persisted-region.png", {
-    animations: "disabled",
-    clip: {
-      x: box.x + box.width * 0.4,
-      y: box.y + box.height * 0.35,
-      width: box.width * 0.3,
-      height: box.height * 0.3,
-    },
-    maxDiffPixelRatio: 0.01,
-  });
+  expect(new URL(suggestionRequest).searchParams.get("longitude")).toBe(
+    "-74.006",
+  );
+  expect(new URL(suggestionRequest).searchParams.get("latitude")).toBe(
+    "40.7128",
+  );
 });

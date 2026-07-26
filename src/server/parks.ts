@@ -83,6 +83,15 @@ function validCoordinate(longitude: unknown, latitude: unknown) {
   );
 }
 
+function validBounds(bounds: GeoBounds) {
+  return (
+    validCoordinate(bounds.west, bounds.south) &&
+    validCoordinate(bounds.east, bounds.north) &&
+    bounds.west <= bounds.east &&
+    bounds.south <= bounds.north
+  );
+}
+
 export function normalizeOverpassElements(
   elements: unknown,
 ): ParkRecord[] {
@@ -219,6 +228,9 @@ function overpassQuery(tiles: MapTile[]) {
   const clauses = tiles
     .map((tile) => {
       const bounds = tileBounds(tile);
+      if (!validBounds(bounds)) {
+        throw new Error(`invalid tile bounds for ${tileKey(tile)}`);
+      }
       return `nwr["leisure"="park"](${bounds.south},${bounds.west},${bounds.north},${bounds.east});`;
     })
     .join("\n");
@@ -238,10 +250,20 @@ async function fetchJson(
       ...init,
       signal: controller.signal,
     });
+    const body = await response.text();
     if (!response.ok) {
-      throw new Error(`request failed with status ${response.status}`);
+      const detail = body.trim().replaceAll(/\s+/g, " ").slice(0, 160);
+      throw new Error(
+        `request failed with status ${response.status}${
+          detail ? `: ${detail}` : ""
+        }`,
+      );
     }
-    return await response.json();
+    try {
+      return JSON.parse(body) as unknown;
+    } catch {
+      throw new Error("returned a non-JSON response");
+    }
   } finally {
     clearTimeout(timeout);
   }
@@ -269,6 +291,9 @@ async function fetchOverpassParks(
 }
 
 function subdivideBounds(bounds: GeoBounds, divisions = 3) {
+  if (!validBounds(bounds) || !Number.isInteger(divisions) || divisions < 1) {
+    throw new Error("cannot subdivide invalid park query bounds");
+  }
   const longitudeStep = (bounds.east - bounds.west) / divisions;
   const latitudeStep = (bounds.north - bounds.south) / divisions;
   return Array.from({ length: divisions * divisions }, (_, index) => {
@@ -312,35 +337,48 @@ async function fetchOrsParks(
 ) {
   const queryBounds = tiles.flatMap((tile) => subdivideBounds(tileBounds(tile)));
   const results = await mapWithConcurrency(queryBounds, 4, async (bounds) => {
-    const payload = (await fetchJson(
-      "https://api.openrouteservice.org/pois",
-      {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          Authorization: apiKey,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          request: "pois",
-          geometry: {
-            bbox: [
-              [bounds.west, bounds.south],
-              [bounds.east, bounds.north],
-            ],
+    try {
+      const payload = (await fetchJson(
+        "https://api.openrouteservice.org/pois",
+        {
+          method: "POST",
+          headers: {
+            Accept: "application/json",
+            Authorization: apiKey,
+            "Content-Type": "application/json",
           },
-          filters: { category_ids: [280] },
-          limit: 2_000,
-        }),
-      },
-      fetchImplementation,
-      20_000,
-    )) as { features?: unknown };
-    return normalizeOrsFeatures(payload?.features);
+          body: JSON.stringify({
+            request: "pois",
+            geometry: {
+              bbox: [
+                [bounds.west, bounds.south],
+                [bounds.east, bounds.north],
+              ],
+            },
+            filters: { category_ids: [280] },
+            limit: 2_000,
+          }),
+        },
+        fetchImplementation,
+        20_000,
+      )) as { features?: unknown };
+      return { parks: normalizeOrsFeatures(payload?.features) };
+    } catch (error) {
+      return { error };
+    }
   });
+  const successfulResults = results.filter(
+    (result): result is { parks: ParkRecord[] } => "parks" in result,
+  );
+  if (successfulResults.length === 0) {
+    const firstFailure = results.find(
+      (result): result is { error: unknown } => "error" in result,
+    );
+    throw firstFailure?.error ?? new Error("all ORS park requests failed");
+  }
   const parks = new Map<string, ParkRecord>();
-  for (const result of results) {
-    for (const park of result) {
+  for (const result of successfulResults) {
+    for (const park of result.parks) {
       parks.set(park.id, park);
     }
   }
@@ -355,27 +393,48 @@ async function fetchMissingTiles(
 ): Promise<Map<string, ParkRecord[]>> {
   const errors: string[] = [];
   let parks: ParkRecord[] | undefined;
+  const overpassProviders = Array.from(
+    new Set([
+      overpassUrl,
+      ...(overpassUrl === "https://overpass-api.de/api/interpreter"
+        ? [
+            "https://overpass.private.coffee/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
+          ]
+        : []),
+    ]),
+  );
   try {
-    parks = await fetchOverpassParks(tiles, fetchImplementation, overpassUrl);
+    parks = await fetchOverpassParks(
+      tiles,
+      fetchImplementation,
+      overpassProviders[0],
+    );
   } catch (error) {
     errors.push(`Overpass ${errorMessage(error)}`);
+  }
+  if (!parks && overpassProviders.length > 1) {
+    try {
+      parks = await Promise.any(
+        overpassProviders
+          .slice(1)
+          .map((provider) =>
+            fetchOverpassParks(tiles, fetchImplementation, provider),
+          ),
+      );
+    } catch (error) {
+      const failures =
+        error instanceof AggregateError ? error.errors : [error];
+      for (const failure of failures) {
+        errors.push(`fallback Overpass ${errorMessage(failure)}`);
+      }
+    }
   }
   if (!parks && orsApiKey) {
     try {
       parks = await fetchOrsParks(tiles, fetchImplementation, orsApiKey);
     } catch (error) {
       errors.push(`ORS ${errorMessage(error)}`);
-    }
-  }
-  if (!parks && overpassUrl === "https://overpass-api.de/api/interpreter") {
-    try {
-      parks = await fetchOverpassParks(
-        tiles,
-        fetchImplementation,
-        "https://overpass.private.coffee/api/interpreter",
-      );
-    } catch (error) {
-      errors.push(`fallback Overpass ${errorMessage(error)}`);
     }
   }
   if (!parks) {

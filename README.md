@@ -5,9 +5,11 @@ The page shell is rendered by Astro, while the interactive MapLibre workspace is
 a React client island.
 
 On startup, the map requests browser geolocation and centers on the user's
-region when permission is granted. The last successful location is stored in
-local browser storage and used as the initial camera position on later visits,
-while a fresh location is requested.
+region at OpenStreetMap zoom 10 when permission is granted. The map reserves
+space for the sidebar when centering. A 40-by-40-mile Area of Interest is
+created automatically, extending 20 miles in every direction from the detected
+location. The last successful location is stored in local browser storage and
+used as the initial origin on later visits, while a fresh location is requested.
 
 ## Development
 
@@ -124,13 +126,12 @@ tab. The action is disabled until an Area of Interest exists.
 ## Filter behavior
 
 - A single **Area of Interest** is mandatory before Actions, Filters, and
-  Heatmaps become available.
-- Select **Draw area**, then press and drag between opposite corners of a
-  rectangle. It cannot be more than 50 miles across in either
-  dimension.
-- **Redefine area** lets you draw and validate a replacement while the current
-  area, filters, and heatmaps remain active. **RESET ALL** removes every
-  configured filter and heatmap after confirmation while preserving the area.
+  Heatmaps become available. It is created automatically from browser
+  geolocation and extends 20 miles from the origin in each direction.
+- **Set origin** opens address autocomplete. Selecting an address replaces the
+  Area of Interest and recalculates every configured filter and heatmap.
+- **RESET ALL** removes every configured filter and heatmap after confirmation
+  while preserving the current origin and area.
 - Active extension filters combine with AND semantics.
 - Filters and heatmaps can each be toggled off without discarding their
   configuration or reloading their data.
@@ -172,8 +173,8 @@ are excluded. Its filter and heatmap share six-hour, zoom-11 tile caches.
   every body of water, from 0 to 2,000 m.
 - **Water influence** renders a blue, full-strength water core and twelve
   geographic contour bands fading to zero at 300 m.
-- Views covering more than 25 cache tiles retain stale data and ask the user to
-  zoom in.
+- Large areas are split into API requests of at most 25 cache tiles and their
+  water records are merged before filtering.
 
 ## Commute time
 

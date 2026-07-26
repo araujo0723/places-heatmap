@@ -60,6 +60,7 @@ vi.mock("maplibre-gl", () => {
     setCenter(center: [number, number]) {
       this.center = { lng: center[0], lat: center[1] };
     }
+    setPadding = vi.fn();
     jumpTo = vi.fn(
       (options: { center: [number, number]; zoom: number }) => {
         this.center = {
@@ -135,8 +136,8 @@ vi.mock("maplibre-gl", () => {
       queueMicrotask(() => {
         const position = {
           coords: {
-            longitude: -73.9857,
-            latitude: 40.7484,
+            longitude: -0.115,
+            latitude: 51.512,
             accuracy: 10,
           },
         } as GeolocationPosition;
@@ -164,48 +165,6 @@ vi.mock("maplibre-gl", () => {
   };
 });
 
-vi.mock("terra-draw-maplibre-gl-adapter", () => ({
-  TerraDrawMapLibreGLAdapter: class {},
-}));
-
-vi.mock("terra-draw", () => {
-  class MockDraw {
-    private snapshot: unknown[] = [];
-    private nextId = 0;
-    on() {}
-    start() {}
-    stop() {}
-    setMode() {}
-    getSnapshot() {
-      return this.snapshot;
-    }
-    getFeatureId() {
-      this.nextId += 1;
-      return `mock-region-${this.nextId}`;
-    }
-    addFeatures(features: any[]) {
-      this.snapshot.push(...features);
-      return features.map(() => ({ valid: true }));
-    }
-    hasFeature(id: string | number) {
-      return this.snapshot.some((feature: any) => feature.id === id);
-    }
-    removeFeatures(ids: Array<string | number>) {
-      this.snapshot = this.snapshot.filter(
-        (feature: any) => !ids.includes(feature.id),
-      );
-    }
-    clear() {
-      this.snapshot = [];
-    }
-  }
-  return {
-    TerraDraw: MockDraw,
-    TerraDrawRectangleMode: class {},
-    TerraDrawSelectMode: class {},
-  };
-});
-
 import MapWorkspace from "./MapWorkspace";
 import { Map as MapLibreMap } from "maplibre-gl";
 import { clearNearbyParkCache } from "../extensions/nearby-parks/data";
@@ -213,46 +172,7 @@ import { clearNearbyWaterCache } from "../extensions/nearby-water/data";
 import { extensionRegistry } from "../extensions/registry";
 
 async function drawArea(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(
-    await screen.findByRole("button", { name: "Define Area of Interest" }),
-  );
-  const overlay = screen.getByTestId("draw-overlay");
-  Object.defineProperties(overlay, {
-    getBoundingClientRect: {
-      value: () => ({
-        left: 0,
-        top: 0,
-        right: 1000,
-        bottom: 700,
-        width: 1000,
-        height: 700,
-        x: 0,
-        y: 0,
-        toJSON: () => ({}),
-      }),
-    },
-    setPointerCapture: { value: vi.fn() },
-    releasePointerCapture: { value: vi.fn() },
-  });
-  fireEvent.pointerDown(overlay, {
-    button: 0,
-    clientX: 500,
-    clientY: 200,
-    isPrimary: true,
-    pointerId: 1,
-  });
-  fireEvent.pointerMove(overlay, {
-    clientX: 700,
-    clientY: 450,
-    isPrimary: true,
-    pointerId: 1,
-  });
-  fireEvent.pointerUp(overlay, {
-    clientX: 700,
-    clientY: 450,
-    isPrimary: true,
-    pointerId: 1,
-  });
+  void user;
   await waitFor(() =>
     expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1"),
   );
@@ -316,75 +236,51 @@ describe("MapWorkspace", () => {
     expect(screen.queryByTestId("location-status")).not.toBeInTheDocument();
   });
 
-  it(
-    "shows a rectangular region preview while the pointer is still down",
-    async () => {
-      const user = userEvent.setup();
-      render(<MapWorkspace />);
+  it("sets a new origin from address autocomplete", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          suggestions: [
+            {
+              label: "1 Peachtree St, Atlanta, GA",
+              address: "1 Peachtree St, Atlanta, GA",
+              center: [-84.388, 33.749],
+            },
+          ],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
 
-      await user.click(
-        await screen.findByRole("button", { name: "Define Area of Interest" }),
-      );
-      const overlay = screen.getByTestId("draw-overlay");
-      Object.defineProperties(overlay, {
-        getBoundingClientRect: {
-          value: () => ({
-            left: 0,
-            top: 0,
-            right: 1000,
-            bottom: 700,
-            width: 1000,
-            height: 700,
-            x: 0,
-            y: 0,
-            toJSON: () => ({}),
-          }),
-        },
-        setPointerCapture: { value: vi.fn() },
-        releasePointerCapture: { value: vi.fn() },
-      });
+    await screen.findByText("Centered near you");
+    await user.click(screen.getByRole("button", { name: "Set origin" }));
+    expect(
+      screen.getByRole("dialog", { name: "Set origin" }),
+    ).toBeInTheDocument();
+    await user.type(
+      screen.getByRole("textbox", { name: "Origin address" }),
+      "Peachtree",
+    );
+    await user.click(
+      await screen.findByRole("button", {
+        name: "1 Peachtree St, Atlanta, GA",
+      }),
+    );
 
-      fireEvent.pointerDown(overlay, {
-        button: 0,
-        clientX: 500,
-        clientY: 200,
-        isPrimary: true,
-        pointerId: 1,
-      });
-      fireEvent.pointerMove(overlay, {
-        clientX: 700,
-        clientY: 200,
-        isPrimary: true,
-        pointerId: 1,
-      });
-      fireEvent.pointerMove(overlay, {
-        clientX: 700,
-        clientY: 450,
-        isPrimary: true,
-        pointerId: 1,
-      });
-
-      expect(screen.getByTestId("draw-preview")).toHaveAttribute(
-        "d",
-        "M 500 200 L 700 200 L 700 450 L 500 450 Z",
-      );
-      expect(screen.getByTestId("draw-preview")).toHaveAttribute("fill", "none");
-      expect(screen.getByTestId("draw-preview")).toHaveAttribute(
-        "stroke",
-        "#64748b",
-      );
-      expect(screen.getByTestId("draw-preview")).toHaveAttribute(
-        "stroke-dasharray",
-        "2 4",
-      );
-      expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent(
-        "0",
-      );
-      expect(
-        screen.getByRole("button", { name: "Define Area of Interest" }),
-      ).toHaveAttribute("aria-pressed", "true");
-    },
-  );
+    const map = (
+      MapLibreMap as unknown as {
+        lastInstance: { jumpTo: ReturnType<typeof vi.fn> };
+      }
+    ).lastInstance;
+    expect(map.jumpTo).toHaveBeenLastCalledWith({
+      center: [-84.388, 33.749],
+      zoom: 10,
+    });
+    expect(screen.queryByRole("dialog", { name: "Set origin" })).not
+      .toBeInTheDocument();
+  });
 
   it("mutes the map outside the Area of Interest", async () => {
     const user = userEvent.setup();
@@ -415,57 +311,26 @@ describe("MapWorkspace", () => {
     }
   });
 
-  it("rejects an Area of Interest over 50 miles across", async () => {
-    const user = userEvent.setup();
+  it("automatically creates an Area of Interest 20 miles in every direction", async () => {
     render(<MapWorkspace />);
 
-    await user.click(
-      await screen.findByRole("button", { name: "Define Area of Interest" }),
-    );
-    const overlay = screen.getByTestId("draw-overlay");
-    Object.defineProperties(overlay, {
-      getBoundingClientRect: {
-        value: () => ({
-          left: 0,
-          top: 0,
-          right: 1000,
-          bottom: 700,
-          width: 1000,
-          height: 700,
-          x: 0,
-          y: 0,
-          toJSON: () => ({}),
-        }),
-      },
-      setPointerCapture: { value: vi.fn() },
-      releasePointerCapture: { value: vi.fn() },
-    });
-    fireEvent.pointerDown(overlay, {
-      button: 0,
-      clientX: 500,
-      clientY: 200,
-      isPrimary: true,
-      pointerId: 1,
-    });
-    fireEvent.pointerMove(overlay, {
-      clientX: 20_500,
-      clientY: 450,
-      isPrimary: true,
-      pointerId: 1,
-    });
-    fireEvent.pointerUp(overlay, {
-      clientX: 20_500,
-      clientY: 450,
-      isPrimary: true,
-      pointerId: 1,
-    });
-
-    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("0");
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "It cannot be more than 50 miles.",
-    );
-    expect(screen.getByRole("button", { name: "Define Area of Interest" }))
-      .toBeInTheDocument();
+    await screen.findByText("Centered near you");
+    const map = (
+      MapLibreMap as unknown as {
+        lastInstance: {
+          getSource(id: string): { data: FeatureCollection } | undefined;
+        };
+      }
+    ).lastInstance;
+    const mask = map.getSource("area-of-interest-mask-source")?.data;
+    const ring =
+      mask?.features[0]?.geometry.type === "Polygon"
+        ? mask.features[0].geometry.coordinates[1]
+        : [];
+    const latitudes = ring.map((position) => position[1]);
+    expect(Math.max(...latitudes) - 51.512).toBeCloseTo(0.289, 2);
+    expect(51.512 - Math.min(...latitudes)).toBeCloseTo(0.289, 2);
+    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1");
   });
 
   it("exposes the Zillow action and nearby-area data contributions", async () => {
@@ -474,16 +339,16 @@ describe("MapWorkspace", () => {
     expect(await screen.findByText("Centered near you")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "GO TO ZILLOW" }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(
-      screen.getByRole("button", { name: "Define Area of Interest" }),
+      screen.getByRole("button", { name: "Set origin" }),
     ).toBeEnabled();
     expect(
       screen.getByRole("button", { name: "Add Filter" }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(
       screen.getByRole("button", { name: "Add Heatmap" }),
-    ).toBeDisabled();
+    ).toBeEnabled();
     expect(screen.getByText("No active filters")).toBeInTheDocument();
     expect(screen.getByText("No active heatmaps")).toBeInTheDocument();
     expect(
@@ -529,7 +394,7 @@ describe("MapWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Reset all" }));
 
     expect(
-      screen.getByRole("button", { name: "Redefine Area of Interest" }),
+      screen.getByRole("button", { name: "Set origin" }),
     ).toBeEnabled();
     expect(screen.getByText("No active filters")).toBeInTheDocument();
     expect(screen.getByText("No active heatmaps")).toBeInTheDocument();
@@ -542,90 +407,62 @@ describe("MapWorkspace", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps the current area active until a redefined area is valid", async () => {
-    const fetchMock = vi.fn(async () =>
-      Response.json({ tiles: [], parks: [] }),
+  it("recalculates active contributions after the origin changes", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
+      String(input).startsWith("/api/address-suggestions")
+        ? Response.json({
+            suggestions: [
+              {
+                label: "Paris, France",
+                address: "Paris, France",
+                center: [2.3522, 48.8566],
+              },
+            ],
+          })
+        : Response.json({ tiles: [], parks: [] }),
     );
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
     render(<MapWorkspace />);
 
     await screen.findByText("Centered near you");
-    (
-      MapLibreMap as unknown as {
-        lastInstance: { setCenter(center: [number, number]): void };
-      }
-    ).lastInstance.setCenter([-0.115, 51.512]);
     await drawArea(user);
     await addContribution(user, "Filter", "nearby-parks/distance");
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([input]) =>
+          String(input).startsWith("/api/parks?"),
+        ),
+      ).toHaveLength(3),
+    );
+    const initialParkRequestCount = fetchMock.mock.calls.filter(([input]) =>
+      String(input).startsWith("/api/parks?"),
+    ).length;
     await waitFor(() =>
       expect(screen.queryByText("Loading")).not.toBeInTheDocument(),
     );
-    const requestCount = fetchMock.mock.calls.length;
-    const map = (
-      MapLibreMap as unknown as {
-        lastInstance: {
-          setCenter(center: [number, number]): void;
-        };
-      }
-    ).lastInstance;
-    map.setCenter([1, 52]);
 
     await user.click(
-      screen.getByRole("button", { name: "Redefine Area of Interest" }),
+      screen.getByRole("button", { name: "Set origin" }),
     );
-    const overlay = screen.getByTestId("draw-overlay");
-    Object.defineProperties(overlay, {
-      getBoundingClientRect: {
-        value: () => ({
-          left: 0,
-          top: 0,
-          right: 1000,
-          bottom: 700,
-          width: 1000,
-          height: 700,
-          x: 0,
-          y: 0,
-          toJSON: () => ({}),
-        }),
-      },
-      setPointerCapture: { value: vi.fn() },
-      releasePointerCapture: { value: vi.fn() },
-    });
-    fireEvent.pointerDown(overlay, {
-      button: 0,
-      clientX: 500,
-      clientY: 200,
-      isPrimary: true,
-      pointerId: 2,
-    });
-    fireEvent.pointerMove(overlay, {
-      clientX: 700,
-      clientY: 450,
-      isPrimary: true,
-      pointerId: 2,
-    });
-
-    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1");
-    expect(screen.queryByText("Active")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(requestCount);
-
-    fireEvent.pointerUp(overlay, {
-      clientX: 700,
-      clientY: 450,
-      isPrimary: true,
-      pointerId: 2,
-    });
+    await user.type(
+      screen.getByRole("textbox", { name: "Origin address" }),
+      "Paris",
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "Paris, France" }),
+    );
     await waitFor(() =>
-      expect(fetchMock.mock.calls.length).toBeGreaterThan(requestCount),
+      expect(
+        fetchMock.mock.calls.filter(([input]) =>
+          String(input).startsWith("/api/parks?"),
+        ).length,
+      ).toBeGreaterThan(initialParkRequestCount),
     );
-    expect(
-      screen.getByRole("button", { name: "Redefine Area of Interest" }),
-    ).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1");
   });
 
-  it("creates the drawn boundary in Zillow before opening a new tab", async () => {
+  it("creates the Area of Interest in Zillow before opening a new tab", async () => {
     const fetchMock = vi.fn(
       async (_input: RequestInfo | URL, _init?: RequestInit) =>
         Response.json({ customRegionId: "saved-region" }),
@@ -755,7 +592,7 @@ describe("MapWorkspace", () => {
       { timeout: 5_000 },
     );
     expect(screen.queryByText("Nearby parks")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
     expect(map.getLayer("filter-owned-regions-fill")).toMatchObject({
       paint: {
@@ -796,7 +633,7 @@ describe("MapWorkspace", () => {
     map.setCenter([1, 52]);
     map.emit("moveend");
     await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("shows status only while a filter is loading or reloading", async () => {
@@ -820,12 +657,9 @@ describe("MapWorkspace", () => {
     expect(screen.queryByText("Off")).not.toBeInTheDocument();
 
     await act(async () => {
-      pendingResponses[0](
-        Response.json({
-          tiles: [],
-          parks: [],
-        }),
-      );
+      for (const resolve of pendingResponses.splice(0)) {
+        resolve(Response.json({ tiles: [], parks: [] }));
+      }
     });
     await waitFor(() =>
       expect(screen.queryByText("Loading")).not.toBeInTheDocument(),
@@ -837,16 +671,13 @@ describe("MapWorkspace", () => {
     fireEvent.change(slider, { target: { value: "350" } });
     fireEvent.pointerUp(slider);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(6));
     expect(screen.getByText("Loading")).toBeInTheDocument();
 
     await act(async () => {
-      pendingResponses[1](
-        Response.json({
-          tiles: [],
-          parks: [],
-        }),
-      );
+      for (const resolve of pendingResponses.splice(0)) {
+        resolve(Response.json({ tiles: [], parks: [] }));
+      }
     });
     await waitFor(() =>
       expect(screen.queryByText("Loading")).not.toBeInTheDocument(),
@@ -899,7 +730,7 @@ describe("MapWorkspace", () => {
         map.getSource("filter-owned-regions-source")?.data.features,
       ).toHaveLength(1),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
 
     const toggle = screen.getByRole("switch", {
@@ -919,7 +750,7 @@ describe("MapWorkspace", () => {
         map.getSource("filter-owned-regions-source")?.data.features,
       ).toHaveLength(0),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
     await user.click(toggle);
 
@@ -930,15 +761,15 @@ describe("MapWorkspace", () => {
         map.getSource("filter-owned-regions-source")?.data.features,
       ).toHaveLength(1),
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("shows and hides a heatmap without reloading its data", async () => {
-    let resolveRequest: ((response: Response) => void) | undefined;
+    const resolveRequests: Array<(response: Response) => void> = [];
     const fetchMock = vi.fn(
       () =>
         new Promise<Response>((resolve) => {
-          resolveRequest = resolve;
+          resolveRequests.push(resolve);
         }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -962,10 +793,12 @@ describe("MapWorkspace", () => {
     expect(screen.getByText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("Off")).not.toBeInTheDocument();
     expect(screen.queryByTestId("map-active-summary")).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
 
     await act(async () => {
-      resolveRequest?.(Response.json({ tiles: [], parks: [] }));
+      for (const resolve of resolveRequests.splice(0)) {
+        resolve(Response.json({ tiles: [], parks: [] }));
+      }
     });
     await waitFor(() =>
       expect(screen.queryByText("Loading")).not.toBeInTheDocument(),
@@ -978,7 +811,7 @@ describe("MapWorkspace", () => {
     expect(screen.getByTestId("map-active-summary")).toHaveTextContent(
       "Park influence",
     );
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("draws only the common boundary of park and water filters", async () => {
@@ -991,12 +824,12 @@ describe("MapWorkspace", () => {
             parks: [
               {
                 id: "way/park",
-                center: [-73.98, 40.75],
+                center: [-0.11, 51.512],
                 bbox: {
-                  west: -73.985,
-                  south: 40.74,
-                  east: -73.975,
-                  north: 40.76,
+                  west: -0.2,
+                  south: 51.4,
+                  east: 0,
+                  north: 51.6,
                 },
               },
             ],
@@ -1007,12 +840,12 @@ describe("MapWorkspace", () => {
           waters: [
             {
               id: "way/water",
-              center: [-73.975, 40.75],
+              center: [-0.105, 51.512],
               bbox: {
-                west: -73.98,
-                south: 40.745,
-                east: -73.97,
-                north: 40.755,
+                west: -0.15,
+                south: 51.45,
+                east: -0.05,
+                north: 51.55,
               },
             },
           ],
@@ -1117,13 +950,13 @@ describe("MapWorkspace", () => {
             {
               type: "Feature",
               id: "inside",
-              geometry: { type: "Point", coordinates: [0.01, 0] },
+              geometry: { type: "Point", coordinates: [-0.1, 51.512] },
               properties: {},
             },
             {
               type: "Feature",
               id: "outside",
-              geometry: { type: "Point", coordinates: [1, 1] },
+              geometry: { type: "Point", coordinates: [1, 52] },
               properties: {},
             },
           ],
@@ -1165,11 +998,11 @@ describe("MapWorkspace", () => {
 
   it("looks up a commute address and draws the selected red filter outline", async () => {
     const polygon = [
-      [-84.5, 33.6],
-      [-84.2, 33.6],
-      [-84.2, 33.9],
-      [-84.5, 33.9],
-      [-84.5, 33.6],
+      [-0.3, 51.4],
+      [0.05, 51.4],
+      [0.05, 51.65],
+      [-0.3, 51.65],
+      [-0.3, 51.4],
     ];
     const fetchMock = vi.fn(
       async (input: RequestInfo | URL, _init?: RequestInit) => {
@@ -1179,7 +1012,7 @@ describe("MapWorkspace", () => {
               {
                 label: "1 Peachtree St, Atlanta, GA",
                 address: "1 Peachtree St, Atlanta, GA",
-                center: [-84.388, 33.749],
+                center: [-0.115, 51.512],
               },
             ],
           });
@@ -1224,11 +1057,11 @@ describe("MapWorkspace", () => {
       "http://localhost",
     ).searchParams;
     expect(Number(suggestionParameters.get("longitude"))).toBeCloseTo(
-      -84.34,
+      -0.115,
       2,
     );
     expect(Number(suggestionParameters.get("latitude"))).toBeCloseTo(
-      33.7525,
+      51.512,
       2,
     );
     await user.click(
@@ -1335,7 +1168,7 @@ describe("MapWorkspace", () => {
       }
     ).lastOptions;
     expect(options.center).toEqual([2.3522, 48.8566]);
-    expect(options.zoom).toBe(11.3);
+    expect(options.zoom).toBe(10);
     expect(
       screen.getByText("Centered at your last known location"),
     ).toBeInTheDocument();
@@ -1346,25 +1179,32 @@ describe("MapWorkspace", () => {
         lastInstance: {
           jumpTo: ReturnType<typeof vi.fn>;
           getZoom(): number;
+          setPadding: ReturnType<typeof vi.fn>;
         };
       }
     ).lastInstance;
     expect(map.jumpTo).toHaveBeenCalledWith({
-      center: [-73.9857, 40.7484],
-      zoom: 11.3,
+      center: [-0.115, 51.512],
+      zoom: 10,
     });
-    expect(map.getZoom()).toBe(11.3);
+    expect(map.getZoom()).toBe(10);
+    expect(map.setPadding).toHaveBeenCalledWith({
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 400,
+    });
     expect(
       JSON.parse(
         localStorage.getItem("places-heatmap:last-location") ?? "null",
       ),
-    ).toEqual({ longitude: -73.9857, latitude: 40.7484 });
+    ).toEqual({ longitude: -0.115, latitude: 51.512 });
   });
 
   it("does not recenter when geolocation matches the saved location", async () => {
     localStorage.setItem(
       "places-heatmap:last-location",
-      JSON.stringify({ longitude: -73.9857, latitude: 40.7484 }),
+      JSON.stringify({ longitude: -0.115, latitude: 51.512 }),
     );
 
     render(<MapWorkspace />);
@@ -1379,6 +1219,6 @@ describe("MapWorkspace", () => {
       }
     ).lastInstance;
     expect(map.jumpTo).not.toHaveBeenCalled();
-    expect(map.getZoom()).toBe(11.3);
+    expect(map.getZoom()).toBe(10);
   });
 });

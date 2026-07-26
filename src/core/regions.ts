@@ -50,8 +50,19 @@ function distanceMiles(
 
 export function regionViewport(region: RegionFeature): MapViewport {
   const positions = polygonPositions(region);
-  if (positions.length === 0) {
-    throw new Error("Area of Interest has no coordinates.");
+  if (
+    positions.length === 0 ||
+    positions.some(
+      ([longitude, latitude]) =>
+        !Number.isFinite(longitude) ||
+        longitude < -180 ||
+        longitude > 180 ||
+        !Number.isFinite(latitude) ||
+        latitude < -90 ||
+        latitude > 90,
+    )
+  ) {
+    throw new Error("Area of Interest has invalid coordinates.");
   }
   const longitudes = positions.map(([longitude]) => longitude);
   const latitudes = positions.map(([, latitude]) => latitude);
