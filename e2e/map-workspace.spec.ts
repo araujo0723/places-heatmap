@@ -334,6 +334,15 @@ test("changes the automatic Area of Interest with Set origin", async ({ page }) 
 
   await expect(page.getByRole("dialog", { name: "Set origin" })).toHaveCount(0);
   await expect(page.getByTestId("area-of-interest-count")).toHaveText("1");
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        JSON.parse(
+          localStorage.getItem("places-heatmap:last-location") ?? "null",
+        ),
+      ),
+    )
+    .toEqual({ longitude: -84.388, latitude: 33.749 });
   expect(new URL(suggestionRequest).searchParams.get("longitude")).toBe(
     "-74.006",
   );

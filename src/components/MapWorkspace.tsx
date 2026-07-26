@@ -83,7 +83,7 @@ const DEFAULT_TILE_URL =
 const DEFAULT_ATTRIBUTION = "© OpenStreetMap contributors";
 const LAST_LOCATION_KEY = "places-heatmap:last-location";
 const INITIAL_ZOOM = 10;
-const AREA_OF_INTEREST_RADIUS_MILES = 20;
+const AREA_OF_INTEREST_RADIUS_MILES = 15;
 const EARTH_RADIUS_MILES = 3_958.7613;
 const MAP_PADDING = { top: 0, right: 0, bottom: 0, left: 400 } as const;
 const SAME_LOCATION_THRESHOLD_METERS = 25;
@@ -581,7 +581,7 @@ function OriginDialog({
           className="mt-2 text-sm leading-5 text-slate-600"
         >
           Search for an address. Selecting it creates a new Area of Interest
-          extending 20 miles in every direction.
+          extending 15 miles in every direction.
         </p>
         <div className="relative mt-4">
           <input
@@ -862,6 +862,8 @@ export default function MapWorkspace() {
     ) {
       return;
     }
+    lastLocationRef.current = center;
+    saveLastLocation(...center);
     setAreaOfInterest(areaAroundOrigin(center));
     mapRef.current?.jumpTo({
       center,

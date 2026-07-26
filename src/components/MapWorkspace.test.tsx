@@ -290,6 +290,11 @@ describe("MapWorkspace", () => {
       center: [-84.388, 33.749],
       zoom: 10,
     });
+    expect(
+      JSON.parse(
+        localStorage.getItem("places-heatmap:last-location") ?? "null",
+      ),
+    ).toEqual({ longitude: -84.388, latitude: 33.749 });
     expect(screen.queryByRole("dialog", { name: "Set origin" })).not
       .toBeInTheDocument();
   });
@@ -323,7 +328,7 @@ describe("MapWorkspace", () => {
     }
   });
 
-  it("automatically creates an Area of Interest 20 miles in every direction", async () => {
+  it("automatically creates an Area of Interest 15 miles in every direction", async () => {
     render(<MapWorkspace />);
 
     await screen.findByText("Centered near you");
@@ -340,8 +345,8 @@ describe("MapWorkspace", () => {
         ? mask.features[0].geometry.coordinates[1]
         : [];
     const latitudes = ring.map((position) => position[1]);
-    expect(Math.max(...latitudes) - 51.512).toBeCloseTo(0.289, 2);
-    expect(51.512 - Math.min(...latitudes)).toBeCloseTo(0.289, 2);
+    expect(Math.max(...latitudes) - 51.512).toBeCloseTo(0.217, 2);
+    expect(51.512 - Math.min(...latitudes)).toBeCloseTo(0.217, 2);
     expect(screen.getByTestId("area-of-interest-count")).toHaveTextContent("1");
   });
 
