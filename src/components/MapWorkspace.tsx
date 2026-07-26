@@ -103,6 +103,9 @@ const NEUTRAL_PREDICATE: PointPredicate = () => true;
 const AREA_OF_INTEREST_MASK_SOURCE_ID = "area-of-interest-mask-source";
 const AREA_OF_INTEREST_MASK_LAYER_ID = "area-of-interest-outside-mask";
 const AREA_OF_INTEREST_OUTLINE_LAYER_ID = "area-of-interest-outline";
+const FILTER_REGIONS_SOURCE_ID = "filter-owned-regions-source";
+const FILTER_REGIONS_FILL_LAYER_ID = "filter-owned-regions-fill";
+const FILTER_REGIONS_LINE_LAYER_ID = "filter-owned-regions-line";
 const WEB_MERCATOR_WORLD_RING: Array<[number, number]> = [
   [-180, -85.051129],
   [180, -85.051129],
@@ -275,6 +278,16 @@ function normalizeResolvedRegions(value: unknown) {
 
 function safeMapId(key: string) {
   return key.replace(/[^a-zA-Z0-9_-]/g, "-");
+}
+
+function heatmapLayerBeforeId(map: MapLibreMap) {
+  for (const layerId of [
+    FILTER_REGIONS_FILL_LAYER_ID,
+    FILTER_REGIONS_LINE_LAYER_ID,
+    "regions-polygon",
+  ]) {
+    if (map.getLayer(layerId)) return layerId;
+  }
 }
 
 function outsideAreaOfInterestMask(
@@ -1346,9 +1359,6 @@ export default function MapWorkspace() {
 
       if (isSurface && !map.getLayer(surfaceLayerId)) {
         const style = entry.contribution.style;
-        const beforeId = map.getLayer("regions-polygon")
-          ? "regions-polygon"
-          : undefined;
         map.addLayer(
           {
             id: surfaceLayerId,
@@ -1363,7 +1373,7 @@ export default function MapWorkspace() {
               "fill-outline-color": "rgba(0, 0, 0, 0)",
             },
           },
-          beforeId,
+          heatmapLayerBeforeId(map),
         );
       }
       if (!isSurface && !map.getLayer(layerId)) {
@@ -1380,16 +1390,10 @@ export default function MapWorkspace() {
             "heatmap-color": colorExpression(style.colorRamp),
           },
         };
-        const beforeId = map.getLayer("regions-polygon")
-          ? "regions-polygon"
-          : undefined;
-        map.addLayer(layer, beforeId);
+        map.addLayer(layer, heatmapLayerBeforeId(map));
       }
       const pointLayerId = `extension-points-${safeKey}`;
       if (!isSurface && !map.getLayer(pointLayerId)) {
-        const beforeId = map.getLayer("regions-polygon")
-          ? "regions-polygon"
-          : undefined;
         map.addLayer(
           {
             id: pointLayerId,
@@ -1412,7 +1416,7 @@ export default function MapWorkspace() {
               "circle-stroke-opacity": 0.9,
             },
           },
-          beforeId,
+          heatmapLayerBeforeId(map),
         );
       }
       const visibility = enabledHeatmapIds.has(instanceId)
@@ -1445,27 +1449,29 @@ export default function MapWorkspace() {
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
-    const sourceId = "filter-owned-regions-source";
-    const fillLayerId = "filter-owned-regions-fill";
-    const lineLayerId = "filter-owned-regions-line";
     const collection: FeatureCollection<RegionGeometry> = {
       type: "FeatureCollection",
       features: visibleOwnedRegions,
     };
-    const source = map.getSource(sourceId) as GeoJSONSource | undefined;
+    const source = map.getSource(
+      FILTER_REGIONS_SOURCE_ID,
+    ) as GeoJSONSource | undefined;
     if (source) {
       source.setData(collection);
     } else {
-      map.addSource(sourceId, { type: "geojson", data: collection });
+      map.addSource(FILTER_REGIONS_SOURCE_ID, {
+        type: "geojson",
+        data: collection,
+      });
     }
     const beforeId = map.getLayer("regions-polygon")
       ? "regions-polygon"
       : undefined;
-    if (!map.getLayer(fillLayerId)) {
+    if (!map.getLayer(FILTER_REGIONS_FILL_LAYER_ID)) {
       map.addLayer(
         {
-          id: fillLayerId,
-          source: sourceId,
+          id: FILTER_REGIONS_FILL_LAYER_ID,
+          source: FILTER_REGIONS_SOURCE_ID,
           type: "fill",
           paint: {
             "fill-color": [
@@ -1483,11 +1489,11 @@ export default function MapWorkspace() {
         beforeId,
       );
     }
-    if (!map.getLayer(lineLayerId)) {
+    if (!map.getLayer(FILTER_REGIONS_LINE_LAYER_ID)) {
       map.addLayer(
         {
-          id: lineLayerId,
-          source: sourceId,
+          id: FILTER_REGIONS_LINE_LAYER_ID,
+          source: FILTER_REGIONS_SOURCE_ID,
           type: "line",
           paint: {
             "line-color": [

@@ -100,8 +100,20 @@ vi.mock("maplibre-gl", () => {
     removeSource(id: string) {
       this.sources.delete(id);
     }
-    addLayer(layer: { id: string }) {
+    addLayer(layer: { id: string }, beforeId?: string) {
+      if (beforeId && this.layers.has(beforeId)) {
+        const reordered = new Map<string, unknown>();
+        for (const [id, existingLayer] of this.layers) {
+          if (id === beforeId) reordered.set(layer.id, layer);
+          reordered.set(id, existingLayer);
+        }
+        this.layers = reordered;
+        return;
+      }
       this.layers.set(layer.id, layer);
+    }
+    getLayerIds() {
+      return [...this.layers.keys()];
     }
     setPaintProperty(id: string, property: string, value: unknown) {
       const layer = this.layers.get(id) as
@@ -564,6 +576,7 @@ describe("MapWorkspace", () => {
         lastInstance: {
           emit(name: string): void;
           getLayer(id: string): unknown;
+          getLayerIds(): string[];
           getSource(id: string): { data: FeatureCollection } | undefined;
           setCenter(center: [number, number]): void;
           setStyleLoaded(value: boolean): void;
@@ -647,6 +660,13 @@ describe("MapWorkspace", () => {
         ],
       },
     });
+    const layerIds = map.getLayerIds();
+    expect(layerIds.indexOf("extension-surface-heatmap-2")).toBeLessThan(
+      layerIds.indexOf("filter-owned-regions-fill"),
+    );
+    expect(layerIds.indexOf("extension-surface-heatmap-2")).toBeLessThan(
+      layerIds.indexOf("filter-owned-regions-line"),
+    );
     expect(
       map.getSource("extension-source-heatmap-2")?.data.features.length,
     ).toBeGreaterThan(1);
