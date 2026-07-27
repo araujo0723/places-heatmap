@@ -4,7 +4,7 @@ import { defineExtension } from "../api";
 import { regionPolygons, zillowPreviewSurface } from "./geometry";
 import { buildZillowRentalUrl, getBoundsForPolygons } from "./zillow";
 
-function ZillowControls({ disabled, regions }: ActionControlProps) {
+function ZillowControls({ disabled, regions, viewport }: ActionControlProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const polygons = useMemo(() => regionPolygons(regions), [regions]);
@@ -32,7 +32,11 @@ function ZillowControls({ disabled, regions }: ActionControlProps) {
       }
 
       window.open(
-        buildZillowRentalUrl(bounds, payload.customRegionId),
+        buildZillowRentalUrl(
+          bounds,
+          payload.customRegionId,
+          viewport.center,
+        ),
         "_blank",
         "noopener,noreferrer",
       );

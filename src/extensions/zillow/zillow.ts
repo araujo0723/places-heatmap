@@ -70,16 +70,16 @@ export function getBoundsForPolygons(
 export function buildZillowRentalUrl(
   bounds: ZillowBounds,
   customRegionId: string,
+  userPosition: ZillowCoordinate,
 ) {
-  const center: ZillowCoordinate = [
-    (bounds.west + bounds.east) / 2,
-    (bounds.south + bounds.north) / 2,
-  ];
   const url = new URL("https://www.zillow.com/homes/for_rent/");
-  url.searchParams.set("userPosition", `${center[0]},${center[1]}`);
+  url.searchParams.set(
+    "userPosition",
+    `${userPosition[0]},${userPosition[1]}`,
+  );
   url.searchParams.set(
     "userPositionBounds",
-    `${center[1] + 0.005},${center[0] + 0.005},${center[1] - 0.005},${center[0] - 0.005}`,
+    `${userPosition[1] + 0.005},${userPosition[0] + 0.005},${userPosition[1] - 0.005},${userPosition[0] - 0.005}`,
   );
   url.searchParams.set("currentLocationSearch", "true");
   url.searchParams.set(
