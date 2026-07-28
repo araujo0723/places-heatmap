@@ -143,9 +143,9 @@ describe("median household income service", () => {
     expect(query).toHaveBeenCalledWith(bounds);
   });
 
-  it("reports how to build a missing local index", () => {
+  it("reports a missing canonical database", () => {
     expect(
       () => new IncomeStore(join(directory, "missing.sqlite")),
-    ).toThrow("Run npm run index:income");
+    ).toThrow("Canonical median household income database could not be opened");
   });
 });

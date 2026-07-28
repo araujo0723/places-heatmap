@@ -34,8 +34,7 @@ export class IncomeStore {
       this.database.exec("PRAGMA query_only = ON");
     } catch (error) {
       throw new Error(
-        `Median household income index could not be opened at ${path}. ` +
-          "Run npm run index:income.",
+        `Canonical median household income database could not be opened at ${path}.`,
         { cause: error },
       );
     }

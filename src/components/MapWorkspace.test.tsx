@@ -511,6 +511,11 @@ describe("MapWorkspace", () => {
         };
       }
     ).lastInstance;
+    await waitFor(() =>
+      expect(
+        map.getSource("area-of-interest-mask-source")?.data.features,
+      ).toHaveLength(1),
+    );
     const mask = map.getSource("area-of-interest-mask-source")?.data;
     const ring =
       mask?.features[0]?.geometry.type === "Polygon"

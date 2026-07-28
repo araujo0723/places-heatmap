@@ -7,7 +7,6 @@
     "dev": "astro dev --host",
     "dev:https": "LOCAL_HTTPS=true astro dev --host",
     "setup:https": "mkdir -p .certs && mkcert -install && mkcert -key-file .certs/places-heatmap-key.pem -cert-file .certs/places-heatmap.pem localhost 127.0.0.1 10.0.0.247",
-    "index:income": "tsx scripts/build-income-index.ts",
     "index:osm": "tsx scripts/build-osm-index.ts",
     "stop": "astro dev stop && fuser -k 4321/tcp",
     "build": "astro build",
@@ -53,10 +52,6 @@
     "vitest": "^4.1.10"
   },
   "devDependencies": {
-    "@types/adm-zip": "^0.5.8",
-    "@types/shapefile": "^0.6.4",
-    "adm-zip": "^0.6.0",
-    "shapefile": "^0.6.6",
     "tsx": "^4.23.1"
   }
 }

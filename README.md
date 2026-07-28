@@ -135,13 +135,9 @@ filter and heatmap geometry to that area, and owns map source/layer lifecycle.
 ### Median household income
 
 The bundled median household income extension reads a local SQLite spatial
-index under `src/extensions/median-household-income/data/`. It does not make
-runtime Census requests or parse the source CSV. Rebuild the index after
-updating `ACSDT5Y2024.B19013-Data.csv` or `tl_2024_13_bg.zip`:
-
-```sh
-npm run index:income
-```
+index under `src/extensions/median-household-income/data/`. That bundled
+database is the canonical income and block-group geometry artifact; the
+extension does not require external source files or runtime Census requests.
 
 Rows without an ACS estimate are omitted. The filter selects block groups at
 or above a minimum income in $25,000 steps, while the heatmap renders all
