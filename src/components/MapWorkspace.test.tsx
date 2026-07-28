@@ -161,12 +161,21 @@ vi.mock("maplibre-gl", () => {
   }
 
   class MockGeolocateControl {
+    static lastInstance: MockGeolocateControl;
+    static setupDelayTriggers = 0;
     private handlers = new Map<string, Array<(...args: any[]) => void>>();
     _updateCamera?: (position: GeolocationPosition) => void;
+    constructor() {
+      MockGeolocateControl.lastInstance = this;
+    }
     on(name: string, handler: (...args: any[]) => void) {
       this.handlers.set(name, [...(this.handlers.get(name) ?? []), handler]);
     }
-    trigger() {
+    trigger = vi.fn(() => {
+      if (MockGeolocateControl.setupDelayTriggers > 0) {
+        MockGeolocateControl.setupDelayTriggers -= 1;
+        return false;
+      }
       queueMicrotask(() => {
         const position = {
           coords: {
@@ -181,7 +190,7 @@ vi.mock("maplibre-gl", () => {
         }
       });
       return true;
-    }
+    });
   }
 
   class MockBounds {
@@ -200,7 +209,10 @@ vi.mock("maplibre-gl", () => {
 });
 
 import MapWorkspace from "./MapWorkspace";
-import { Map as MapLibreMap } from "maplibre-gl";
+import {
+  GeolocateControl,
+  Map as MapLibreMap,
+} from "maplibre-gl";
 import { extensionRegistry } from "../extensions/registry";
 
 const optionalExtensionDataModules = import.meta.glob(
@@ -264,6 +276,11 @@ describe("MapWorkspace", () => {
       id,
       state,
     }));
+    (
+      GeolocateControl as unknown as {
+        setupDelayTriggers: number;
+      }
+    ).setupDelayTriggers = 0;
   });
 
   afterEach(() => {
@@ -346,6 +363,11 @@ describe("MapWorkspace", () => {
         ],
       },
     });
+    (
+      GeolocateControl as unknown as {
+        setupDelayTriggers: number;
+      }
+    ).setupDelayTriggers = 1;
     const user = userEvent.setup();
     render(<MapWorkspace />);
 
@@ -370,6 +392,18 @@ describe("MapWorkspace", () => {
         localStorage.getItem("places-heatmap:last-location") ?? "null",
       ),
     ).toEqual({ longitude: -84.388, latitude: 33.749 });
+    await waitFor(() =>
+      expect(
+        (
+          GeolocateControl as unknown as {
+            lastInstance: { trigger: ReturnType<typeof vi.fn> };
+          }
+        ).lastInstance.trigger,
+      ).toHaveBeenCalledTimes(2),
+    );
+    expect(screen.getByTestId("location-status")).toHaveTextContent(
+      "Loaded saved starting location",
+    );
 
     await user.click(screen.getByRole("switch", { name: "Commute enabled" }));
     await waitFor(() =>

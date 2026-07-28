@@ -380,6 +380,14 @@ test("creates, shares, loads, and updates a saved map URL", async ({ page }) => 
   await expect(
     page.getByRole("switch", { name: "Commute enabled" }),
   ).not.toBeChecked();
+  const currentLocationDot = page.locator(
+    ".maplibregl-user-location-dot",
+  );
+  await expect(currentLocationDot).toBeVisible();
+  await expect(currentLocationDot).toHaveCSS(
+    "background-color",
+    "rgb(29, 161, 242)",
+  );
 
   const secondUpdate = page.waitForResponse(
     (response) =>

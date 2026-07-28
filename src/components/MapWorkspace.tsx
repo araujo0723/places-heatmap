@@ -856,6 +856,8 @@ function ToolbarButton({
 export default function MapWorkspace() {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  const geolocateRef = useRef<maplibregl.GeolocateControl | null>(null);
+  const preserveSavedOriginOnGeolocateRef = useRef(false);
   const renderedLayerKeysRef = useRef(new Set<string>());
   const contributionInstanceRef = useRef(0);
   const initialSavedMapIdRef = useRef(readSavedMapId());
@@ -1115,6 +1117,7 @@ export default function MapWorkspace() {
         showUserLocation: true,
         showAccuracyCircle: true,
       });
+      geolocateRef.current = geolocate;
       // MapLibre always updates the camera before emitting "geolocate".
       // Control that hook so a matching cached fix causes no camera movement
       // and every actual location change uses the same workspace zoom.
@@ -1123,6 +1126,7 @@ export default function MapWorkspace() {
           _updateCamera: (position: GeolocationPosition) => void;
         }
       )._updateCamera = (position) => {
+        if (preserveSavedOriginOnGeolocateRef.current) return;
         const nextLocation: [number, number] = [
           position.coords.longitude,
           position.coords.latitude,
@@ -1148,6 +1152,10 @@ export default function MapWorkspace() {
             position.coords.longitude,
             position.coords.latitude,
           ];
+          if (preserveSavedOriginOnGeolocateRef.current) {
+            preserveSavedOriginOnGeolocateRef.current = false;
+            return;
+          }
           lastLocationRef.current = nextLocation;
           saveLastLocation(...nextLocation);
           setAreaOfInterest(areaAroundOrigin(nextLocation));
@@ -1156,7 +1164,13 @@ export default function MapWorkspace() {
           setLocationStatus("unavailable");
         }
       });
-      geolocate.on("error", () => setLocationStatus("unavailable"));
+      geolocate.on("error", () => {
+        if (preserveSavedOriginOnGeolocateRef.current) {
+          preserveSavedOriginOnGeolocateRef.current = false;
+          return;
+        }
+        setLocationStatus("unavailable");
+      });
       map.addControl(geolocate, "top-right");
 
       const onLoad = () => {
@@ -1183,6 +1197,7 @@ export default function MapWorkspace() {
       map.on("error", onError);
 
       return () => {
+        geolocateRef.current = null;
         map.remove();
         mapRef.current = null;
       };
@@ -1190,6 +1205,40 @@ export default function MapWorkspace() {
       setMapError(errorMessage(error));
     }
   }, []);
+
+  useEffect(() => {
+    if (
+      !initialSavedMapIdRef.current ||
+      !configurationReady ||
+      !mapReady ||
+      !geolocateRef.current
+    ) {
+      return;
+    }
+
+    // A shared map keeps its saved origin and camera, but it should still ask
+    // MapLibre to render the browser's current position as the blue dot.
+    preserveSavedOriginOnGeolocateRef.current = Boolean(
+      loadedSavedOriginRef.current,
+    );
+    const geolocate = geolocateRef.current;
+    let retryTimer: number | undefined;
+    let attemptsRemaining = 100;
+
+    const triggerWhenReady = () => {
+      if (geolocateRef.current !== geolocate) return;
+      if (geolocate.trigger()) return;
+      attemptsRemaining -= 1;
+      if (attemptsRemaining > 0) {
+        retryTimer = window.setTimeout(triggerWhenReady, 100);
+      }
+    };
+
+    triggerWhenReady();
+    return () => {
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [configurationReady, mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
