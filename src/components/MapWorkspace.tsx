@@ -22,10 +22,12 @@ import {
   normalizeSurfaceHeatmap,
 } from "../core/composition";
 import {
-  clipSurfaceCollection,
-  intersectRegionGroups,
   regionViewport,
 } from "../core/regions";
+import {
+  calculateClippedSurfaces,
+  calculateRegionIntersection,
+} from "../core/geometry-worker-client";
 import {
   searchAddresses,
   type AddressSelection,
@@ -1340,17 +1342,70 @@ export default function MapWorkspace() {
       ),
     [enabledFilters],
   );
-  const constrainedBoundary = useMemo(() => {
-    if (!areaOfInterest) return undefined;
-    return intersectRegionGroups([
-      [areaOfInterest],
-      ...regionFilters.map(
-        ({ instanceId }) => filterRuntime[instanceId]?.regions ?? [],
-      ),
-    ]);
+  const [constrainedBoundary, setConstrainedBoundary] = useState<
+    RegionFeature | undefined
+  >(areaOfInterest);
+  const [boundaryRecalculating, setBoundaryRecalculating] = useState(false);
+
+  useEffect(() => {
+    if (!areaOfInterest) {
+      setConstrainedBoundary(undefined);
+      setBoundaryRecalculating(false);
+      return;
+    }
+    if (regionFilters.length === 0) {
+      setConstrainedBoundary(areaOfInterest);
+      setBoundaryRecalculating(false);
+      return;
+    }
+
+    const waitingForRegions = regionFilters.some(({ instanceId }) => {
+      const runtime = filterRuntime[instanceId];
+      return (
+        runtime?.status === "loading" ||
+        (!runtime?.regions &&
+          runtime?.status !== "ready" &&
+          runtime?.status !== "error")
+      );
+    });
+    if (waitingForRegions) {
+      setBoundaryRecalculating(true);
+      return;
+    }
+
+    const controller = new AbortController();
+    setBoundaryRecalculating(true);
+    void calculateRegionIntersection(
+      [
+        [areaOfInterest],
+        ...regionFilters.map(
+          ({ instanceId }) => filterRuntime[instanceId]?.regions ?? [],
+        ),
+      ],
+      controller.signal,
+    )
+      .then((boundary) => {
+        if (controller.signal.aborted) return;
+        setConstrainedBoundary(boundary);
+        setBoundaryRecalculating(false);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setConstrainedBoundary(undefined);
+        setBoundaryRecalculating(false);
+        setMapError(`Map geometry could not be recalculated: ${errorMessage(error)}`);
+      });
+
+    return () => controller.abort();
   }, [areaOfInterest, filterRuntime, regionFilters]);
   const visibleOwnedRegions = useMemo(() => {
-    if (!constrainedBoundary || regionFilters.length === 0) return [];
+    if (
+      boundaryRecalculating ||
+      !constrainedBoundary ||
+      regionFilters.length === 0
+    ) {
+      return [];
+    }
 
     const properties = { ...constrainedBoundary.properties };
     for (const { entry } of regionFilters) {
@@ -1374,7 +1429,7 @@ export default function MapWorkspace() {
     }
 
     return [{ ...constrainedBoundary, properties }];
-  }, [constrainedBoundary, regionFilters]);
+  }, [boundaryRecalculating, constrainedBoundary, regionFilters]);
   const actionRegions = useMemo<FeatureCollection<RegionGeometry>>(() => {
     return {
       type: "FeatureCollection",
@@ -1388,6 +1443,7 @@ export default function MapWorkspace() {
     !mapReady ||
     !areaOfInterest ||
     !constrainedBoundary ||
+    boundaryRecalculating ||
     enabledFilters.some(
       ({ instanceId, entry }) => {
         const runtime = filterRuntime[instanceId];
@@ -1496,24 +1552,80 @@ export default function MapWorkspace() {
     return groups;
   }, [activeHeatmaps, areaOfInterest, heatmapRuntime]);
 
-  const surfaceCollections = useMemo(() => {
-    const groups = new Map<
-      string,
-      FeatureCollection<RegionGeometry, SurfaceProperties>
-    >();
-    for (const { instanceId, entry } of activeHeatmaps) {
-      if (entry.contribution.kind !== "surface") continue;
-      const surface =
-        heatmapRuntime[instanceId]?.surface ?? EMPTY_SURFACE_COLLECTION;
-      groups.set(
-        instanceId,
-        areaOfInterest
-          ? clipSurfaceCollection(surface, [areaOfInterest])
-          : EMPTY_SURFACE_COLLECTION,
-      );
+  const [surfaceCollections, setSurfaceCollections] = useState(
+    () =>
+      new Map<
+        string,
+        FeatureCollection<RegionGeometry, SurfaceProperties>
+      >(),
+  );
+  const [surfacesRecalculating, setSurfacesRecalculating] =
+    useState(false);
+
+  useEffect(() => {
+    const selections = activeHeatmaps.filter(
+      ({ instanceId, entry }) =>
+        entry.contribution.kind === "surface" &&
+        enabledHeatmapIds.has(instanceId),
+    );
+    if (!areaOfInterest || selections.length === 0) {
+      setSurfaceCollections(new Map());
+      setSurfacesRecalculating(false);
+      return;
     }
-    return groups;
-  }, [activeHeatmaps, areaOfInterest, heatmapRuntime]);
+
+    const waitingForSurfaces = selections.some(({ instanceId }) => {
+      const runtime = heatmapRuntime[instanceId];
+      return (
+        runtime?.status === "loading" ||
+        (!runtime?.surface &&
+          runtime?.status !== "ready" &&
+          runtime?.status !== "error")
+      );
+    });
+    if (waitingForSurfaces) {
+      setSurfacesRecalculating(true);
+      return;
+    }
+
+    const controller = new AbortController();
+    setSurfacesRecalculating(true);
+    void calculateClippedSurfaces(
+      selections.map(({ instanceId }) => ({
+        instanceId,
+        collection:
+          heatmapRuntime[instanceId]?.surface ??
+          EMPTY_SURFACE_COLLECTION,
+      })),
+      [areaOfInterest],
+      controller.signal,
+    )
+      .then((surfaces) => {
+        if (controller.signal.aborted) return;
+        setSurfaceCollections(
+          new Map(
+            surfaces.map(({ instanceId, collection }) => [
+              instanceId,
+              collection,
+            ]),
+          ),
+        );
+        setSurfacesRecalculating(false);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setSurfaceCollections(new Map());
+        setSurfacesRecalculating(false);
+        setMapError(`Map geometry could not be recalculated: ${errorMessage(error)}`);
+      });
+
+    return () => controller.abort();
+  }, [
+    activeHeatmaps,
+    areaOfInterest,
+    enabledHeatmapIds,
+    heatmapRuntime,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1868,6 +1980,9 @@ export default function MapWorkspace() {
     return () => window.clearTimeout(timeout);
   }, [configurationReady, savedMapState]);
 
+  const geometryRecalculating =
+    boundaryRecalculating || surfacesRecalculating;
+
   return (
     <main className="relative h-screen min-h-[640px] min-w-[1024px] overflow-hidden bg-slate-200 text-slate-900">
       <div
@@ -1876,6 +1991,21 @@ export default function MapWorkspace() {
         className="!absolute !inset-0"
         aria-label="Interactive places map"
       />
+
+      {geometryRecalculating ? (
+        <div
+          aria-live="polite"
+          className="pointer-events-none absolute top-4 left-1/2 z-20 flex -translate-x-1/2 items-center gap-2 rounded-full border border-slate-200 bg-white/95 px-4 py-2 text-xs font-semibold text-slate-700 shadow-lg backdrop-blur"
+          data-testid="geometry-recalculation-status"
+          role="status"
+        >
+          <span
+            aria-hidden="true"
+            className="size-4 animate-spin rounded-full border-2 border-slate-300 border-t-amber-500"
+          />
+          Recalculating map…
+        </div>
+      ) : null}
 
       <aside className="absolute top-4 bottom-4 left-4 z-10 flex w-96 flex-col overflow-hidden rounded-2xl bg-white/95 shadow-[0_24px_55px_-16px_rgba(15,23,42,0.5),0_8px_20px_-10px_rgba(15,23,42,0.35)] backdrop-blur">
         <header className="flex shrink-0 items-center gap-2 border-b border-slate-950 bg-slate-900 px-5 py-4">

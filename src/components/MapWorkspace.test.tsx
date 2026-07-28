@@ -526,9 +526,11 @@ describe("MapWorkspace", () => {
     render(<MapWorkspace />);
 
     expect(await screen.findByText("Centered near you")).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "GO TO ZILLOW" }),
-    ).toBeEnabled();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "GO TO ZILLOW" }),
+      ).toBeEnabled(),
+    );
     expect(
       screen
         .getByRole("button", { name: "GO TO ZILLOW" })
@@ -593,6 +595,22 @@ describe("MapWorkspace", () => {
       map.getSource("extension-source-heatmap-1")?.data.features[0]
         .geometry.type,
     ).toBe("Polygon");
+
+    const visibility = screen.getByRole("switch", {
+      name: "Zillow Preview Region visible",
+    });
+    await user.click(visibility);
+    await waitFor(() =>
+      expect(
+        map.getSource("extension-source-heatmap-1")?.data.features,
+      ).toHaveLength(0),
+    );
+    await user.click(visibility);
+    await waitFor(() =>
+      expect(
+        map.getSource("extension-source-heatmap-1")?.data.features,
+      ).toHaveLength(1),
+    );
   });
 
   it("confirms RESET ALL and preserves the Area of Interest", async () => {
@@ -868,9 +886,11 @@ describe("MapWorkspace", () => {
     expect(layerIds.indexOf("extension-surface-heatmap-2")).toBeLessThan(
       layerIds.indexOf("filter-owned-regions-line"),
     );
-    expect(
-      map.getSource("extension-source-heatmap-2")?.data.features.length,
-    ).toBeGreaterThan(1);
+    await waitFor(() =>
+      expect(
+        map.getSource("extension-source-heatmap-2")?.data.features.length,
+      ).toBeGreaterThan(1),
+    );
 
     map.setStyleLoaded(true);
     map.setCenter([1, 52]);
@@ -927,6 +947,81 @@ describe("MapWorkspace", () => {
     );
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
     expect(screen.queryByText("Off")).not.toBeInTheDocument();
+  });
+
+  it("shows a map recalculation spinner while geometry is in the worker", async () => {
+    class DeferredGeometryWorker {
+      static instances: DeferredGeometryWorker[] = [];
+      onmessage: ((event: MessageEvent<any>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+      request?: {
+        kind: "intersect-regions";
+        groups: FeatureCollection["features"][][];
+      };
+
+      constructor() {
+        DeferredGeometryWorker.instances.push(this);
+      }
+
+      postMessage(request: DeferredGeometryWorker["request"]) {
+        this.request = request;
+      }
+
+      terminate() {}
+    }
+
+    vi.stubGlobal("Worker", DeferredGeometryWorker);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          tiles: [],
+          parks: [
+            {
+              id: "way/worker-park",
+              center: [-0.115, 51.512],
+              bbox: {
+                west: -0.12,
+                south: 51.51,
+                east: -0.11,
+                north: 51.515,
+              },
+            },
+          ],
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<MapWorkspace />);
+
+    await drawArea(user);
+    await addContribution(user, "Filter", "nearby-parks/distance");
+
+    expect(
+      await screen.findByTestId("geometry-recalculation-status"),
+    ).toHaveTextContent("Recalculating map…");
+    await waitFor(() =>
+      expect(DeferredGeometryWorker.instances).toHaveLength(1),
+    );
+
+    const worker = DeferredGeometryWorker.instances[0];
+    const boundary = worker.request?.groups[1]?.[0];
+    expect(worker.request?.kind).toBe("intersect-regions");
+    expect(boundary).toBeDefined();
+    act(() => {
+      worker.onmessage?.({
+        data: {
+          ok: true,
+          result: { kind: "intersect-regions", boundary },
+        },
+      } as MessageEvent);
+    });
+
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("geometry-recalculation-status"),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it("toggles a filter immediately without reloading its data", async () => {
@@ -1375,13 +1470,16 @@ describe("MapWorkspace", () => {
         };
       }
     ).lastInstance;
-    expect(
-      map.getSource("filter-owned-regions-source")?.data.features[0].properties,
-    ).toMatchObject({
-      __hostFillColor: "#dc2626",
-      __hostLineColor: "#dc2626",
-      __hostLineWidth: 2.5,
-    });
+    await waitFor(() =>
+      expect(
+        map.getSource("filter-owned-regions-source")?.data.features[0]
+          .properties,
+      ).toMatchObject({
+        __hostFillColor: "#dc2626",
+        __hostLineColor: "#dc2626",
+        __hostLineWidth: 2.5,
+      }),
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/commute/isochrones",
       expect.objectContaining({ method: "POST" }),

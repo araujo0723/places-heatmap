@@ -132,6 +132,21 @@ Extensions never receive the MapLibre instance. The host validates data,
 composes all active predicates with the Area of Interest constraint, clips
 filter and heatmap geometry to that area, and owns map source/layer lifecycle.
 
+### Median household income
+
+The bundled median household income extension reads a local SQLite spatial
+index under `src/extensions/median-household-income/data/`. It does not make
+runtime Census requests or parse the source CSV. Rebuild the index after
+updating `ACSDT5Y2024.B19013-Data.csv` or `tl_2024_13_bg.zip`:
+
+```sh
+npm run index:income
+```
+
+Rows without an ACS estimate are omitted. The filter selects block groups at
+or above a minimum income in $25,000 steps, while the heatmap renders all
+available estimates on a gold scale.
+
 ### Self-contained server APIs
 
 An extension can keep its client, core, server, tests, and Astro-style API

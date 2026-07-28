@@ -2,6 +2,7 @@ import { featureCollection, polygon } from "@turf/helpers";
 import { normalizeHeatmapFeatures, pointMatchesRegions } from "./composition";
 import {
   areaOfInterestIsWithinLimit,
+  clipSurfaceCollection,
   clipRegions,
   filterRegionComponentsByArea,
   intersectRegionGroups,
@@ -171,5 +172,74 @@ describe("region collection simplification", () => {
         [rectangle(0, 0, 0.5, 0.5)],
       ),
     ).toEqual([]);
+  });
+
+  it("preserves exact contained surface geometry and caches the result", () => {
+    const contained = {
+      ...rectangle(1, 1, 2, 2),
+      id: "contained",
+      properties: { weight: 0.5 },
+    };
+    const crossing = {
+      ...rectangle(-1, 4, 1, 6),
+      id: "crossing",
+      properties: { weight: 0.75 },
+    };
+    const outside = {
+      ...rectangle(20, 20, 21, 21),
+      id: "outside",
+      properties: { weight: 1 },
+    };
+    const collection = featureCollection([contained, crossing, outside]);
+    const mask = rectangle(0, 0, 10, 10);
+
+    const first = clipSurfaceCollection(collection, [mask]);
+    const second = clipSurfaceCollection(collection, [mask]);
+
+    expect(second).toBe(first);
+    expect(first.features).toHaveLength(2);
+    expect(first.features[0]).toBe(contained);
+    expect(first.features[0].geometry.coordinates).toBe(
+      contained.geometry.coordinates,
+    );
+    expect(first.features[1].id).toBe("crossing");
+    expect(first.features[1].properties).toBe(crossing.properties);
+    expect(regionViewport(first.features[1]).bounds).toEqual({
+      west: 0,
+      south: 4,
+      east: 1,
+      north: 6,
+    });
+  });
+
+  it("keeps every coordinate when a rectangular constraint contains a mask", () => {
+    const detailed = polygon([
+      [
+        [1, 1],
+        [2, 1],
+        [2.5, 1.25],
+        [3, 1],
+        [4, 1],
+        [4, 4],
+        [1, 4],
+        [1, 1],
+      ],
+      [
+        [1.5, 1.5],
+        [1.5, 2],
+        [2, 2],
+        [2, 1.5],
+        [1.5, 1.5],
+      ],
+    ]);
+    const boundary = intersectRegionGroups(
+      [[rectangle(0, 0, 10, 10)], [detailed]],
+      0,
+    );
+
+    expect(boundary?.geometry.type).toBe("Polygon");
+    expect(boundary?.geometry.coordinates).toEqual(
+      detailed.geometry.coordinates,
+    );
   });
 });

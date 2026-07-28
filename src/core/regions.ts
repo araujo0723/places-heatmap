@@ -15,6 +15,168 @@ export const MINIMUM_RESULT_REGION_AREA_SQUARE_METERS = 100_000;
 export const MAX_AREA_OF_INTEREST_DIMENSION_MILES = 50;
 const EARTH_RADIUS_MILES = 3_958.7613;
 
+interface RegionBounds {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+const geometryBoundsCache = new WeakMap<RegionGeometry, RegionBounds>();
+const singleMaskClipCache = new WeakMap<
+  FeatureCollection<RegionGeometry, SurfaceProperties>,
+  WeakMap<
+    RegionFeature,
+    FeatureCollection<RegionGeometry, SurfaceProperties>
+  >
+>();
+
+function geometryBounds(geometry: RegionGeometry): RegionBounds | undefined {
+  const cached = geometryBoundsCache.get(geometry);
+  if (cached) return cached;
+
+  let west = Number.POSITIVE_INFINITY;
+  let south = Number.POSITIVE_INFINITY;
+  let east = Number.NEGATIVE_INFINITY;
+  let north = Number.NEGATIVE_INFINITY;
+  const polygons =
+    geometry.type === "Polygon"
+      ? [geometry.coordinates]
+      : geometry.coordinates;
+
+  for (const polygon of polygons) {
+    for (const ring of polygon) {
+      for (const position of ring) {
+        const [longitude, latitude] = position;
+        if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+          return undefined;
+        }
+        west = Math.min(west, longitude);
+        south = Math.min(south, latitude);
+        east = Math.max(east, longitude);
+        north = Math.max(north, latitude);
+      }
+    }
+  }
+
+  if (
+    !Number.isFinite(west) ||
+    !Number.isFinite(south) ||
+    !Number.isFinite(east) ||
+    !Number.isFinite(north)
+  ) {
+    return undefined;
+  }
+
+  const bounds = { west, south, east, north };
+  geometryBoundsCache.set(geometry, bounds);
+  return bounds;
+}
+
+function boundsHavePositiveOverlap(
+  first: RegionBounds,
+  second: RegionBounds,
+) {
+  return !(
+    first.east <= second.west ||
+    first.west >= second.east ||
+    first.north <= second.south ||
+    first.south >= second.north
+  );
+}
+
+function boundsContain(container: RegionBounds, contained: RegionBounds) {
+  return (
+    contained.west >= container.west &&
+    contained.south >= container.south &&
+    contained.east <= container.east &&
+    contained.north <= container.north
+  );
+}
+
+function rectangleBounds(region: RegionFeature): RegionBounds | undefined {
+  if (
+    region.geometry.type !== "Polygon" ||
+    region.geometry.coordinates.length !== 1
+  ) {
+    return undefined;
+  }
+  const ring = region.geometry.coordinates[0];
+  if (
+    ring.length !== 5 ||
+    ring[0][0] !== ring[4][0] ||
+    ring[0][1] !== ring[4][1]
+  ) {
+    return undefined;
+  }
+  const bounds = geometryBounds(region.geometry);
+  if (!bounds) return undefined;
+
+  const expectedCorners = new Set([
+    `${bounds.west},${bounds.south}`,
+    `${bounds.west},${bounds.north}`,
+    `${bounds.east},${bounds.south}`,
+    `${bounds.east},${bounds.north}`,
+  ]);
+  const actualCorners = new Set(
+    ring.slice(0, -1).map(([longitude, latitude]) => {
+      return `${longitude},${latitude}`;
+    }),
+  );
+  if (
+    actualCorners.size !== 4 ||
+    [...actualCorners].some((corner) => !expectedCorners.has(corner))
+  ) {
+    return undefined;
+  }
+  for (let index = 0; index < ring.length - 1; index += 1) {
+    const current = ring[index];
+    const next = ring[index + 1];
+    if (current[0] !== next[0] && current[1] !== next[1]) return undefined;
+  }
+  return bounds;
+}
+
+type FastIntersection =
+  | { handled: false }
+  | { handled: true; feature: RegionFeature | undefined };
+
+function fastIntersection(
+  first: RegionFeature,
+  second: RegionFeature,
+): FastIntersection {
+  const firstBounds = geometryBounds(first.geometry);
+  const secondBounds = geometryBounds(second.geometry);
+  if (!firstBounds || !secondBounds) return { handled: false };
+  if (!boundsHavePositiveOverlap(firstBounds, secondBounds)) {
+    return { handled: true, feature: undefined };
+  }
+
+  const firstRectangle = rectangleBounds(first);
+  if (firstRectangle && boundsContain(firstRectangle, secondBounds)) {
+    return {
+      handled: true,
+      feature: {
+        type: "Feature",
+        properties: {},
+        geometry: second.geometry,
+      },
+    };
+  }
+  const secondRectangle = rectangleBounds(second);
+  if (secondRectangle && boundsContain(secondRectangle, firstBounds)) {
+    return {
+      handled: true,
+      feature: {
+        type: "Feature",
+        properties: {},
+        geometry: first.geometry,
+      },
+    };
+  }
+  return { handled: false };
+}
+
 function polygonPositions(region: RegionFeature): Array<[number, number]> {
   const polygons =
     region.geometry.type === "Polygon"
@@ -165,6 +327,8 @@ export function intersectRegionGroups(
     .slice(1)
     .reduce<RegionFeature | undefined>((result, mask) => {
       if (!result) return undefined;
+      const fast = fastIntersection(result, mask);
+      if (fast.handled) return fast.feature;
       return (
         (intersect(
           featureCollection([result, mask]),
@@ -181,12 +345,33 @@ export function clipSurfaceCollection(
   collection: FeatureCollection<RegionGeometry, SurfaceProperties>,
   regions: ReadonlyArray<RegionFeature>,
 ): FeatureCollection<RegionGeometry, SurfaceProperties> {
+  const singleMask = regions.length === 1 ? regions[0] : undefined;
+  if (singleMask) {
+    const cached = singleMaskClipCache.get(collection)?.get(singleMask);
+    if (cached) return cached;
+  }
+
   const mask = unionRegions(regions);
   if (!mask) return collection;
 
-  return {
+  const clippedCollection: FeatureCollection<
+    RegionGeometry,
+    SurfaceProperties
+  > = {
     type: "FeatureCollection",
     features: collection.features.flatMap((feature) => {
+      const fast = fastIntersection(feature, mask);
+      if (fast.handled) {
+        if (!fast.feature) return [];
+        if (fast.feature.geometry === feature.geometry) return [feature];
+        return [
+          {
+            ...fast.feature,
+            id: feature.id,
+            properties: feature.properties,
+          },
+        ];
+      }
       const clipped = intersect(
         featureCollection([feature, mask]),
       ) as RegionFeature | null;
@@ -201,6 +386,15 @@ export function clipSurfaceCollection(
         : [];
     }),
   };
+  if (singleMask) {
+    let maskCache = singleMaskClipCache.get(collection);
+    if (!maskCache) {
+      maskCache = new WeakMap();
+      singleMaskClipCache.set(collection, maskCache);
+    }
+    maskCache.set(singleMask, clippedCollection);
+  }
+  return clippedCollection;
 }
 
 export function clipRegions(
@@ -211,6 +405,18 @@ export function clipRegions(
   if (!mask) return [...regions];
 
   return regions.flatMap((feature) => {
+    const fast = fastIntersection(feature, mask);
+    if (fast.handled) {
+      if (!fast.feature) return [];
+      if (fast.feature.geometry === feature.geometry) return [feature];
+      return [
+        {
+          ...fast.feature,
+          id: feature.id,
+          properties: feature.properties,
+        },
+      ];
+    }
     const clipped = intersect(
       featureCollection([feature, mask]),
     ) as RegionFeature | null;

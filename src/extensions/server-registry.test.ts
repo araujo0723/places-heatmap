@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { createExtensionApiRegistry } from "./server-registry";
 
 describe("extension API registry", () => {
